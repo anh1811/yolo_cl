@@ -1,1 +1,5 @@
-/home/ngocanh/Documents/final_thesis/code/YOLOv3-PyTorch/PASCAL_VOC/
+YOLOv3-PyTorch/PASCAL_VOC/
+YOLOv3-PyTorch/archive.zip
+YOLOv3-PyTorch/yolov3.weights
+YOLOv3-PyTorch/my_checkpoint.pth.tar
+YOLOv3-PyTorch/__pycache__
