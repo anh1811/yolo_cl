@@ -18,14 +18,17 @@ from utils import (
     get_loaders,
     plot_couple_examples
 )
-from loss import YoloLoss
+from loss import YoloLoss, feature_distillation, roi_head_loss
 
-torch.backends.cudnn.benchmark = 
+torch.backends.cudnn.benchmark = True
 
 
 def train_fn(train_loader, model, optimizer, loss_fn, scaler, scaled_anchors):
     loop = tqdm(train_loader, leave=True)
     losses = []
+    is_base = cfg.BASE
+    distill_ft = cfg.DISTILL_FEATURES
+    distill_logit = cfg.DISTILL_LOGITS
     for batch_idx, (x, y) in enumerate(loop):
         x = x.to(config.DEVICE)
         y0, y1, y2 = (
@@ -35,12 +38,30 @@ def train_fn(train_loader, model, optimizer, loss_fn, scaler, scaled_anchors):
         )
 
         with torch.cuda.amp.autocast():
-            out = model(x)
-            loss = (
+            features, out = model(x)
+            if not is_base:
+                prev_features, out = model.base_model(x)
+                loss_distill = 0
+                if distill_feature:
+                    loss_distill += feature_distillation(prev_features, feature)
+                if distill_logit:
+                    logits = out[..., 6: cfg.BASE_CLASS]
+                    prev_logits = out[..., 6: cfg.BASE_CLASS]
+                    anchors = out[..., :5]
+                    prev_anchors = out[..., :5]
+                    loss_distill += roi_head_loss(logtis, anchors, prev_logits, prev_anchors)
+                loss = (
+                loss_distill + 
                 loss_fn(out[0], y0, scaled_anchors[0])
                 + loss_fn(out[1], y1, scaled_anchors[1])
                 + loss_fn(out[2], y2, scaled_anchors[2])
-            )
+                )
+            else:
+                loss = ( 
+                loss_fn(out[0], y0, scaled_anchors[0])
+                + loss_fn(out[1], y1, scaled_anchors[1])
+                + loss_fn(out[2], y2, scaled_anchors[2])
+                )
 
         losses.append(loss.item())
         optimizer.zero_grad()
@@ -55,7 +76,21 @@ def train_fn(train_loader, model, optimizer, loss_fn, scaler, scaled_anchors):
 
 
 def main():
-    model = YOLOv3(num_classes=config.NUM_CLASSES).to(config.DEVICE)
+    if not config.BASE:
+        model = YOLOv3(num_classes=config.BASE_CLASS).to(config.DEVICE)
+    else:
+        model = YOLOV3(num_classes=config.BASE_CLASS + config.NEW_CLASS).to(config.DEVICES)
+    distill_enable = cfg.DISTILL
+    if distill_enable:
+        base = YOLOv3(num_classes=config.BASE_CLASS).to(config.DEVICE)
+        
+        for param in self.base_model.parameters():
+                param.requires_grad = False
+        base.load_base_checkpoint(config.BASE_CHECK_POINT)
+        '''load base model need to build later because dont know what to save in base model  '''
+        model.base_model = base
+    
+    
     # print(model)
     # model.layers[15].pred[1] = CNNBlock(1024, 25 * 3, bn_act=True, kernel_size=1)
     # model.layers[22].pred[1] = CNNBlock(512, 25 * 3, bn_act=True, kernel_size=1)
@@ -65,7 +100,7 @@ def main():
     )
     loss_fn = YoloLoss()
     scaler = torch.cuda.amp.GradScaler()
-
+    # reload test and train 
     train_loader, test_loader, train_eval_loader = get_loaders(
         train_csv_path=config.DATASET + "/train.csv", test_csv_path=config.DATASET + "/test.csv"
     )

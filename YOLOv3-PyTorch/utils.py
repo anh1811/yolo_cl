@@ -430,6 +430,13 @@ def save_checkpoint(model, optimizer, filename="my_checkpoint.pth.tar"):
     }
     torch.save(checkpoint, filename)
 
+def load_base_checkpoint(chechkpoint_file, model):
+    '''
+        load_checkpoint model and set require_grad = False
+    '''
+    print("=> Loading checkpoint")
+    checkpoint = torch.load(checkpoint_file, map_location=config.DEVICE)
+    model.load_state_dict(checkpoint["state_dict"])
 
 def load_checkpoint(checkpoint_file, model, optimizer, lr):
     print("=> Loading checkpoint")
@@ -447,6 +454,11 @@ def get_loaders(train_csv_path, test_csv_path):
     from dataset import YOLODataset
 
     IMAGE_SIZE = config.IMAGE_SIZE
+    if config.BASE:
+        classes = config.BASE_CLASS
+    else:
+        classes = config.BASE_CLASS + config.NEW_CLASS
+
     train_dataset = YOLODataset(
         train_csv_path,
         transform=config.train_transforms,
@@ -454,6 +466,7 @@ def get_loaders(train_csv_path, test_csv_path):
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
+        filter_dataset = classes
     )
     test_dataset = YOLODataset(
         test_csv_path,
@@ -462,6 +475,7 @@ def get_loaders(train_csv_path, test_csv_path):
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
+        filter_dataset = classes
     )
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -487,6 +501,7 @@ def get_loaders(train_csv_path, test_csv_path):
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
+        filter_dataset = classes,
     )
     train_eval_loader = DataLoader(
         dataset=train_eval_dataset,

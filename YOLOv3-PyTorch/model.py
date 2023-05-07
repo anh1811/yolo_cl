@@ -93,6 +93,7 @@ class ScalePrediction(nn.Module):
         self.num_classes = num_classes
 
     def forward(self, x):
+        # batch size, anchors per scale, grid size, grid size, 5 + number of classes
         return (
             self.pred(x)
             .reshape(x.shape[0], 3, self.num_classes + 5, x.shape[2], x.shape[3])
@@ -101,13 +102,31 @@ class ScalePrediction(nn.Module):
 
 
 class YOLOv3(nn.Module):
-    def __init__(self, in_channels=3, num_classes=80):
+    def __init__(self, in_channels=3, num_classes=80, ):
         super().__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.layers = self._create_conv_layers()
+        self.base_model = None
+        self.distill_feature = cfg.DISTILL_FEATURES
+        self.warp = cfg.WARP
+        self.feature_store = None 
+        self.enable_warp_train = False 
+
+
+    def set_base_model(self, base_model):
+        self.base_model = base_model 
+    
+    def get_warp_loss(self, all_images_in_store):
+        '''
+            compute_loss for warp function
+        '''
+        pass 
 
     def forward(self, x):
+        if self.enable_warp_train:
+            return get_warp_loss(x)
+        self.features = []
         outputs = []  # for each scale
         route_connections = []
         for layer in self.layers:
@@ -118,13 +137,21 @@ class YOLOv3(nn.Module):
             x = layer(x)
 
             if isinstance(layer, ResidualBlock) and layer.num_repeats == 8:
+                #feature 2,3
+                features.append(x)
                 route_connections.append(x)
+            
+            if isinstance(layer, ResidualBlock) and layer.num_repeats == 4:
+                #feture 1
+                features.append(x)
+
 
             elif isinstance(layer, nn.Upsample):
                 x = torch.cat([x, route_connections[-1]], dim=1)
                 route_connections.pop()
 
-        return outputs
+        return outputs, features
+
 
     def _create_conv_layers(self):
         layers = nn.ModuleList()

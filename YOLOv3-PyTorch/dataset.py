@@ -30,6 +30,7 @@ class YOLODataset(Dataset):
         S=[13, 26, 52],
         C=20,
         transform=None,
+        filter_dataset = None,
     ):
         self.annotations = pd.read_csv(csv_file)
         self.img_dir = img_dir
@@ -42,6 +43,7 @@ class YOLODataset(Dataset):
         self.num_anchors_per_scale = self.num_anchors // 3
         self.C = C
         self.ignore_iou_thresh = 0.5
+        self.filter_dataset = filter_dataset
 
     def __len__(self):
         return len(self.annotations)
@@ -49,6 +51,8 @@ class YOLODataset(Dataset):
     def __getitem__(self, index):
         label_path = os.path.join(self.label_dir, self.annotations.iloc[index, 1])
         bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        if self.filter_dataset:
+            bboxes = [box for box in bboxes if int(box[-1]) not in range(self.filter_dataset)]
         img_path = os.path.join(self.img_dir, self.annotations.iloc[index, 0])
         image = np.array(Image.open(img_path).convert("RGB"))
 
@@ -94,14 +98,15 @@ def test():
     anchors = config.ANCHORS
 
     transform = config.test_transforms
-
+    IMAGE_SIZE = 32
     dataset = YOLODataset(
-        "COCO/train.csv",
-        "COCO/images/images/",
-        "COCO/labels/labels_new/",
-        S=[13, 26, 52],
-        anchors=anchors,
-        transform=transform,
+        'PASCAL_VOC/test.csv',
+        transform=config.train_transforms,
+        S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
+        img_dir=config.IMG_DIR,
+        label_dir=config.LABEL_DIR,
+        anchors=config.ANCHORS,
+        filter_dataset = 19,
     )
     S = [13, 26, 52]
     scaled_anchors = torch.tensor(anchors) / (

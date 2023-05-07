@@ -25,6 +25,11 @@ SAVE_MODEL = True
 CHECKPOINT_FILE = "my_checkpoint.pth.tar"
 IMG_DIR = DATASET + "/images/"
 LABEL_DIR = DATASET + "/labels/"
+DISTILL = True
+BASE_CLASS = 19
+NEW_CLASS = 1
+BASE = True
+
 
 ANCHORS = [
     [(0.28, 0.22), (0.38, 0.48), (0.9, 0.78)],
