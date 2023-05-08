@@ -6,7 +6,7 @@ import config
 import torch
 import torch.optim as optim
 
-from model_with_weights2 import YOLOv3
+from model import YOLOv3
 from tqdm import tqdm
 from utils import (
     mean_average_precision,
@@ -26,9 +26,9 @@ torch.backends.cudnn.benchmark = True
 def train_fn(train_loader, model, optimizer, loss_fn, scaler, scaled_anchors):
     loop = tqdm(train_loader, leave=True)
     losses = []
-    is_base = cfg.BASE
-    distill_ft = cfg.DISTILL_FEATURES
-    distill_logit = cfg.DISTILL_LOGITS
+    is_base = config.BASE
+    distill_ft = config.DISTILL_FEATURES
+    distill_logit = config.DISTILL_LOGITS
     for batch_idx, (x, y) in enumerate(loop):
         x = x.to(config.DEVICE)
         y0, y1, y2 = (
@@ -42,14 +42,14 @@ def train_fn(train_loader, model, optimizer, loss_fn, scaler, scaled_anchors):
             if not is_base:
                 prev_features, out = model.base_model(x)
                 loss_distill = 0
-                if distill_feature:
-                    loss_distill += feature_distillation(prev_features, feature)
+                if distill_ft:
+                    loss_distill += feature_distillation(prev_features, features)
                 if distill_logit:
-                    logits = out[..., 6: cfg.BASE_CLASS]
-                    prev_logits = out[..., 6: cfg.BASE_CLASS]
+                    logits = out[..., 6: config.BASE_CLASS]
+                    prev_logits = out[..., 6: config.BASE_CLASS]
                     anchors = out[..., :5]
                     prev_anchors = out[..., :5]
-                    loss_distill += roi_head_loss(logtis, anchors, prev_logits, prev_anchors)
+                    loss_distill += roi_head_loss(logits, anchors, prev_logits, prev_anchors)
                 loss = (
                 loss_distill + 
                 loss_fn(out[0], y0, scaled_anchors[0])
@@ -76,15 +76,15 @@ def train_fn(train_loader, model, optimizer, loss_fn, scaler, scaled_anchors):
 
 
 def main():
-    if not config.BASE:
+    if config.BASE:
         model = YOLOv3(num_classes=config.BASE_CLASS).to(config.DEVICE)
     else:
-        model = YOLOV3(num_classes=config.BASE_CLASS + config.NEW_CLASS).to(config.DEVICES)
-    distill_enable = cfg.DISTILL
+        model = YOLOv3(num_classes=config.BASE_CLASS + config.NEW_CLASS).to(config.DEVICE)
+    distill_enable = config.DISTILL
     if distill_enable:
         base = YOLOv3(num_classes=config.BASE_CLASS).to(config.DEVICE)
         
-        for param in self.base_model.parameters():
+        for param in base.parameters():
                 param.requires_grad = False
         base.load_base_checkpoint(config.BASE_CHECK_POINT)
         '''load base model need to build later because dont know what to save in base model  '''

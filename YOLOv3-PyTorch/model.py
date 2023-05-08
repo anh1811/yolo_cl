@@ -4,6 +4,7 @@ Implementation of YOLOv3 architecture
 
 import torch
 import torch.nn as nn
+import config as cfg
 
 """ 
 Information about architecture config:
@@ -108,7 +109,7 @@ class YOLOv3(nn.Module):
         self.in_channels = in_channels
         self.layers = self._create_conv_layers()
         self.base_model = None
-        self.distill_feature = cfg.DISTILL_FEATURES
+        self.distill_feature = cfg.DISTILL
         self.warp = cfg.WARP
         self.feature_store = None 
         self.enable_warp_train = False 
@@ -138,19 +139,19 @@ class YOLOv3(nn.Module):
 
             if isinstance(layer, ResidualBlock) and layer.num_repeats == 8:
                 #feature 2,3
-                features.append(x)
+                self.features.append(x)
                 route_connections.append(x)
             
             if isinstance(layer, ResidualBlock) and layer.num_repeats == 4:
                 #feture 1
-                features.append(x)
+                self.features.append(x)
 
 
             elif isinstance(layer, nn.Upsample):
                 x = torch.cat([x, route_connections[-1]], dim=1)
                 route_connections.pop()
 
-        return outputs, features
+        return outputs, self.features
 
 
     def _create_conv_layers(self):

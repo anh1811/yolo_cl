@@ -254,7 +254,7 @@ class YOLOv3(nn.Module):
 
 if __name__ == "__main__":
 
-    model = YOLOv3()
+    model = YOLOv3(num_classes=19)
     # print(model.type)
     model.load_darknet_weights(weights_path="yolov3.weights")
     # model.layers[15].pred[1] = CNNBlock(1024, 25 * 3, bn_act=False, kernel_size=1)
