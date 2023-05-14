@@ -51,8 +51,10 @@ class YOLODataset(Dataset):
     def __getitem__(self, index):
         label_path = os.path.join(self.label_dir, self.annotations.iloc[index, 1])
         bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        # print(len(bboxes))
         if self.filter_dataset:
-            bboxes = [box for box in bboxes if int(box[-1]) not in range(self.filter_dataset)]
+            bboxes = [box for box in bboxes if int(box[-1]) in self.filter_dataset]
+            # print(len(bboxes))
         img_path = os.path.join(self.img_dir, self.annotations.iloc[index, 0])
         image = np.array(Image.open(img_path).convert("RGB"))
 
@@ -106,7 +108,7 @@ def test():
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = 19,
+        filter_dataset = [i for i in range(20)],
     )
     S = [13, 26, 52]
     scaled_anchors = torch.tensor(anchors) / (
@@ -119,7 +121,11 @@ def test():
         for i in range(y[0].shape[1]):
             anchor = scaled_anchors[i]
             print(anchor.shape)
-            print(y[i].shape)
+            print(x.shape)
+            # print(y[i][...,-1])
+            print(y[i][y[i][...,0] == 1.][...,-1])
+            # print(y[i])
+            # print(y[i][..., 0])
             boxes += cells_to_bboxes(
                 y[i], is_preds=False, S=y[i].shape[2], anchors=anchor
             )[0]

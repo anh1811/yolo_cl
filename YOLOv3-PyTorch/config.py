@@ -8,31 +8,46 @@ from albumentations.pytorch import ToTensorV2
 DATASET = 'PASCAL_VOC'
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # seed_everything()  # If you want deterministic behavior
-NUM_WORKERS = 4
+NUM_WORKERS = 8
 BATCH_SIZE = 32
 IMAGE_SIZE = 416
 NUM_CLASSES = 80
 LEARNING_RATE = 3e-5
 WEIGHT_DECAY = 1e-4
 NUM_EPOCHS = 100
-CONF_THRESHOLD = 0.6
+CONF_THRESHOLD = 0.5
 MAP_IOU_THRESH = 0.5
 NMS_IOU_THRESH = 0.45
 S = [IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8]
 PIN_MEMORY = True
-LOAD_MODEL = True
+LOAD_MODEL = False
 SAVE_MODEL = True
-CHECKPOINT_FILE = "my_checkpoint.pth.tar"
+CHECKPOINT_FILE = "checkpoint.pth.tar"
 IMG_DIR = DATASET + "/images/"
 LABEL_DIR = DATASET + "/labels/"
-DISTILL = False
-DISTILL_FEATURES = False
-DISTILL_LOGITS = False
+DISTILL = True
+DISTILL_FEATURES = True
+DISTILL_LOGITS = True
 BASE_CLASS = 19
 NEW_CLASS = 1
-BASE = True
-WARP = False
+BASE = False
 
+
+#WARP 
+WARP = True
+TRAIN_WARP = True 
+TRAIN_WARP_AT_ITR_NO = 10
+WARP_LAYERS = ()
+NUM_FEATURES_PER_CLASS = 3
+NUM_IMAGES_PER_CLASS = 10
+BATCH_SIZE = 2
+USE_FEATURE_STORE = True
+IMAGE_STORE_LOC = ''
+
+
+
+
+BASE_CHECK_POINT = "checkpoint.pth.tar"
 ANCHORS = [
     [(0.28, 0.22), (0.38, 0.48), (0.9, 0.78)],
     [(0.07, 0.15), (0.15, 0.11), (0.14, 0.29)],

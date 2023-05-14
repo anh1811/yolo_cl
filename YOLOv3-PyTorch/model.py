@@ -5,7 +5,7 @@ Implementation of YOLOv3 architecture
 import torch
 import torch.nn as nn
 import config as cfg
-
+from store import Store
 """ 
 Information about architecture config:
 Tuple is structured by (filters, kernel_size, stride) 
@@ -97,36 +97,63 @@ class ScalePrediction(nn.Module):
         # batch size, anchors per scale, grid size, grid size, 5 + number of classes
         return (
             self.pred(x)
-            .reshape(x.shape[0], 3, self.num_classes + 5, x.shape[2], x.shape[3])
+            .reshape(x.shape[0], 3, -1, x.shape[2], x.shape[3])
             .permute(0, 1, 3, 4, 2)
         )
 
 
 class YOLOv3(nn.Module):
-    def __init__(self, in_channels=3, num_classes=80, ):
+    def __init__(self, in_channels=3, num_classes=80):
         super().__init__()
+        self.cfg = cfg
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.layers = self._create_conv_layers()
-        self.base_model = None
         self.distill_feature = cfg.DISTILL
         self.warp = cfg.WARP
-        self.feature_store = None 
-        self.enable_warp_train = False 
-
-
-    def set_base_model(self, base_model):
-        self.base_model = base_model 
+        self.train_warp = cfg.TRAIN_WARP
+        self.feature_store = Store(cfg.NUM_CLASSES+1,
+                                   cfg.NUM_FEATURES_PER_CLASS) if cfg.WARP else None
     
-    def get_warp_loss(self, all_images_in_store):
+    def get_features(self):
+        return self.features
+    
+    def get_warp_loss(self, x_store):
         '''
+            x_store: x,y -> x is the image, y is the label 
             compute_loss for warp function
         '''
-        pass 
+        # print("hello")
+        outputs = []  # for each scale
+        route_connections = []
+        for layer in self.layers:
+            if isinstance(layer, ScalePrediction):
+                outputs.append(layer(x))
+                continue
+
+            x = layer(x)
+
+            if isinstance(layer, ResidualBlock) and layer.num_repeats == 8:
+                #feature 2,3
+                self.features.append(x)
+                route_connections.append(x)
+            
+            if isinstance(layer, ResidualBlock) and layer.num_repeats == 4:
+                #feture 1
+                self.features.append(x)
+
+
+            elif isinstance(layer, nn.Upsample):
+                x = torch.cat([x, route_connections[-1]], dim=1)
+                route_connections.pop()
+
+
+        self.feature_store.reset()
+        return outputs
 
     def forward(self, x):
-        if self.enable_warp_train:
-            return get_warp_loss(x)
+        if self.train_warp and self.cfg.USE_FEATURE_STORE:
+            return self.get_warp_loss(x)
         self.features = []
         outputs = []  # for each scale
         route_connections = []
@@ -151,7 +178,7 @@ class YOLOv3(nn.Module):
                 x = torch.cat([x, route_connections[-1]], dim=1)
                 route_connections.pop()
 
-        return outputs, self.features
+        return outputs
 
 
     def _create_conv_layers(self):

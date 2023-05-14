@@ -5,6 +5,8 @@ import numpy as np
 import os
 import random
 import torch
+import random
+from collections import deque
 
 from collections import Counter
 from torch.utils.data import DataLoader
@@ -384,15 +386,16 @@ def check_class_accuracy(model, loader, threshold):
         x = x.to(config.DEVICE)
         with torch.no_grad():
             out = model(x)
-
+        # print(torch.sigmoid(out[2][..., 0][:2]))
         for i in range(3):
             y[i] = y[i].to(config.DEVICE)
             obj = y[i][..., 0] == 1 # in paper this is Iobj_i
             noobj = y[i][..., 0] == 0  # in paper this is Iobj_i
-
+            # print(obj)
             correct_class += torch.sum(
                 torch.argmax(out[i][..., 5:][obj], dim=-1) == y[i][..., 5][obj]
             )
+            # print(correct_class)
             tot_class_preds += torch.sum(obj)
 
             obj_preds = torch.sigmoid(out[i][..., 0]) > threshold
@@ -430,7 +433,7 @@ def save_checkpoint(model, optimizer, filename="my_checkpoint.pth.tar"):
     }
     torch.save(checkpoint, filename)
 
-def load_base_checkpoint(chechkpoint_file, model):
+def load_base_checkpoint(checkpoint_file, model):
     '''
         load_checkpoint model and set require_grad = False
     '''
@@ -455,9 +458,9 @@ def get_loaders(train_csv_path, test_csv_path):
 
     IMAGE_SIZE = config.IMAGE_SIZE
     if config.BASE:
-        classes = config.BASE_CLASS
+        classes = [i for i in range(config.BASE_CLASS)]
     else:
-        classes = config.BASE_CLASS + config.NEW_CLASS
+        classes = [19]
 
     train_dataset = YOLODataset(
         train_csv_path,
@@ -549,3 +552,4 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+

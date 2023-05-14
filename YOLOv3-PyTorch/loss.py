@@ -6,9 +6,9 @@ instead of BinaryCrossEntropy.
 import random
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 from utils import intersection_over_union
-
+import config
 
 class YoloLoss(nn.Module):
     def __init__(self):
@@ -78,6 +78,34 @@ class YoloLoss(nn.Module):
             + self.lambda_class * class_loss
         )
 
+def loss_logits_dummy(predictions, prev_preds, anchors):
+    sigmoid = nn.Sigmoid()
+    bce = nn.BCEWithLogitLoss()
+    obj = prev_preds[..., 0] >= 0.6
+    noobj = prev_preds[..., 0] <= 0.5
+    lambda_class = 1
+    lambda_noobj = 5
+    lambda_obj = 1
+    lambda_box = 10
+    no_object_loss = bce(
+            (predictions[..., 0:1][noobj]), (prev_preds[..., 0:1][noobj]),
+        )
+    object_loss = bce(
+        (predictions[..., 0:1][obj]), (prev_preds[..., 0:1][obj])
+    )
+    predictions[..., 1:3] = sigmoid(predictions[...,1:3])
+    prev_preds[..., 1:3] = sigmoid(prev_preds[...,1:3])
+    box_loss = F.mse_loss(predictions[..., 1:5][obj], prev_preds[..., 1:5][obj]) 
+    class_loss = logit_distillation(
+        predictions[..., 5:config.BASE_CLASS][obj], prev_preds[..., 5:config.BASE_CLASS][obj]
+    )
+    return (
+        lambda_box * box_loss
+        + lambda_obj * object_loss
+        + lambda_noobj * no_object_loss
+        + lambda_class * class_loss
+    )
+
 def rpn_loss(pred_objectness_logits, pred_anchor_deltas, prev_pred_objectness_logits, prev_pred_anchor_deltas):
     loss = logit_distillation(pred_objectness_logits[0], prev_pred_objectness_logits[0])
     loss += anchor_delta_distillation(pred_anchor_deltas[0], prev_pred_anchor_deltas[0])
@@ -109,8 +137,11 @@ def anchor_delta_distillation(current_delta, prev_delta):
 
 
 def feature_distillation(features, prev_features):
+    loss = 0
+    for i in range(3):
+        loss += F.mse_loss(features[i], prev_features[i])
     # return smooth_l1_loss(features, prev_features, beta=0.1, reduction='mean')
-    return F.mse_loss(features, prev_features)
+    return loss
     # criterion_kd = Attention()
     # # criterion_kd = NSTLoss()
     # # criterion_kd = DistillKL(T=4)
