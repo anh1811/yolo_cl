@@ -6,16 +6,16 @@ instead of BinaryCrossEntropy.
 import random
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from utils import intersection_over_union
 import config
+from utils import intersection_over_union
+import torch.nn.functional as F
 
 class YoloLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self.mse = nn.MSELoss()
         self.bce = nn.BCEWithLogitsLoss()
-        self.entropy = nn.CrossEntropyLoss()
+        self.entropy = nn.CrossEntropyLoss(label_smoothing=0.1)
         self.sigmoid = nn.Sigmoid()
 
         # Constants signifying how much to pay for each respective part of the loss
@@ -24,19 +24,49 @@ class YoloLoss(nn.Module):
         self.lambda_obj = 1
         self.lambda_box = 10
 
-    def forward(self, predictions, target, anchors):
+    def forward(self, predictions, target, anchors, prev_preds = None, gamma = 0.2):
         # Check where obj and noobj (we ignore if target == -1)
+        # prev_preds = None
+        alpha = 2
         obj = target[..., 0] == 1  # in paper this is Iobj_i
-        noobj = target[..., 0] == 0  # in paper this is Inoobj_i
+        noobj_target = target[..., 0] == 0
+        predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])
+        # print(noobj_target)
+        if prev_preds is not None:
+            #confidence_score
+            prev_preds[..., 0] = self.sigmoid(prev_preds[..., 0])
+            obj_conf = prev_preds[..., 0] >= 0.3
 
+            #noobj confidence score
+            prev_preds[..., 1:3] = self.sigmoid(prev_preds[..., 1:3])
+            noobj_pred = (prev_preds[..., 0] < 0.3).type(torch.int8)
+            noobj = (noobj_pred + noobj_target.type(torch.int8)) == 2
+            
+            box_loss_distill = F.mse_loss(predictions[..., 1:5][obj_conf], prev_preds[..., 1:5][obj_conf])
+            #obj c
+            object_loss_distill = self.bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
+            
+            #class_prob
+            class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
+            std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
+            thres = mean_prob  + alpha * std_prob
+            # print(thres.shape)
+            # print(class_prob.shape)
+
+            obj_cls = class_prob > thres
+            class_loss_distill = self.mse(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
+            prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
+
+        else:
+            noobj = noobj_target
         # ======================= #
         #   FOR NO OBJECT LOSS    #
         # ======================= #
-
+        # print(noobj)
         no_object_loss = self.bce(
             (predictions[..., 0:1][noobj]), (target[..., 0:1][noobj]),
         )
-
+        # print(no_object_loss)
         # ==================== #
         #   FOR OBJECT LOSS    #
         # ==================== #
@@ -49,8 +79,8 @@ class YoloLoss(nn.Module):
         # ======================== #
         #   FOR BOX COORDINATES    #
         # ======================== #
-
-        predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])  # x,y coordinates
+        # print(target[..., 5][obj])
+          # x,y coordinates
         target[..., 3:5] = torch.log(
             (1e-16 + target[..., 3:5] / anchors)
         )  # width, height coordinates
@@ -64,47 +94,76 @@ class YoloLoss(nn.Module):
             (predictions[..., 5:][obj]), (target[..., 5][obj].long()),
         )
 
-        #    print("__________________________________")
-        #    print(self.lambda_box * box_loss)
-        #    print(self.lambda_obj * object_loss)
-        #    print(self.lambda_noobj * no_object_loss)
-        #    print(self.lambda_class * class_loss)
-        #    print("\n")
-
+        # print("__________________________________")
+        # print(self.lambda_box * box_loss)
+        # print(self.lambda_obj * object_loss)
+        # print(self.lambda_noobj * no_object_loss)
+        # print(f"class_dis: {self.lambda_class * class_loss}")
+        # print("\n")
+        if prev_preds is not None:
+            loss_distill = class_loss_distill * self.lambda_class + object_loss_distill * self.lambda_obj + box_loss_distill * self.lambda_box
+        else:
+            loss_distill = 0
         return (
-            self.lambda_box * box_loss
+            gamma * loss_distill + 
+            (1-gamma) * (self.lambda_box * box_loss
             + self.lambda_obj * object_loss
             + self.lambda_noobj * no_object_loss
-            + self.lambda_class * class_loss
+            + self.lambda_class * class_loss)
         )
 
 def loss_logits_dummy(predictions, prev_preds, anchors):
     sigmoid = nn.Sigmoid()
-    bce = nn.BCEWithLogitLoss()
-    obj = prev_preds[..., 0] >= 0.6
-    noobj = prev_preds[..., 0] <= 0.5
+    bce = nn.BCEWithLogitsLoss()
+    prev_preds[..., 0] = sigmoid(prev_preds[..., 0])
+    obj_conf = prev_preds[..., 0] >= 0.8  # in paper this is Iobj_i
+    # obj_cls = prev_preds[..., 0] >= 0.5
+    noobj = prev_preds[..., 0] < 0.5
     lambda_class = 1
     lambda_noobj = 5
     lambda_obj = 1
     lambda_box = 10
-    no_object_loss = bce(
-            (predictions[..., 0:1][noobj]), (prev_preds[..., 0:1][noobj]),
-        )
-    object_loss = bce(
-        (predictions[..., 0:1][obj]), (prev_preds[..., 0:1][obj])
-    )
-    predictions[..., 1:3] = sigmoid(predictions[...,1:3])
-    prev_preds[..., 1:3] = sigmoid(prev_preds[...,1:3])
-    box_loss = F.mse_loss(predictions[..., 1:5][obj], prev_preds[..., 1:5][obj]) 
-    class_loss = logit_distillation(
-        predictions[..., 5:config.BASE_CLASS][obj], prev_preds[..., 5:config.BASE_CLASS][obj]
-    )
+    alpha = 2
+    #this loss has to be small bcs it will contradict the performance of the model 
+    # no_object_loss = bce(
+    #         (predictions[..., 0:1][noobj]), (prev_preds[..., 0:1][noobj]),
+    #     )
+    # anchors = anchors.reshape(1, 3, 1, 1, 2)
+    #maybe try incorporate this into the loss function because it might help
+    # box_preds = torch.cat([self.sigmoid(predictions[..., 1:3]), torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
+    # prev_box_preds = torch.cat([self.sigmoid(prev_preds[..., 1:3]), torch.exp(prev_preds[..., 3:5]) * anchors], dim=-1)
+    # ious = intersection_over_union(box_preds[obj], prev_box_preds[obj]).detach()
+    object_loss = bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
+
+    # predictions[..., 1:3] = sigmoid(predictions[..., 1:3])  # x,y coordinates
+    # target[..., 3:5] = torch.log(
+    #         (1e-16 + target[..., 3:5] / anchors)
+    #     )  # width, height coordinates
+    prev_preds[..., 1:3] = sigmoid(prev_preds[..., 1:3])
+    
+    box_loss = F.mse_loss(predictions[..., 1:5][obj_conf], prev_preds[..., 1:5][obj_conf])
+    # print(predictions[..., ][obj_cls])
+    # print(prev_preds[..., -1][obj])
+    class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
+    std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
+    thres = mean_prob  + alpha * std_prob
+    # print(thres.shape)
+    # print(class_prob.shape)
+    obj_cls = class_prob > thres
+    class_loss = anchor_delta_distillation(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
+     prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
+    # class_loss = logit_distillation(
+            # (predictions[..., 5:5+config.BASE_CLASS][obj_cls]), (prev_preds[..., 5:5+config.BASE_CLASS][obj_cls])) 
+    # print(box_loss)
+    # print(object_loss)
+    # # print(no_object_loss)
+    # print(f"class_distill:{lambda_class * class_loss}")
     return (
-        lambda_box * box_loss
-        + lambda_obj * object_loss
-        + lambda_noobj * no_object_loss
-        + lambda_class * class_loss
-    )
+            lambda_box * box_loss
+            + lambda_obj * object_loss
+            # + lambda_noobj * no_object_loss
+            + lambda_class * class_loss
+        )
 
 def rpn_loss(pred_objectness_logits, pred_anchor_deltas, prev_pred_objectness_logits, prev_pred_anchor_deltas):
     loss = logit_distillation(pred_objectness_logits[0], prev_pred_objectness_logits[0])
@@ -137,15 +196,8 @@ def anchor_delta_distillation(current_delta, prev_delta):
 
 
 def feature_distillation(features, prev_features):
+    # return smooth_l1_loss(features, prev_features, beta=0.1, reduction='mean')
     loss = 0
     for i in range(3):
         loss += F.mse_loss(features[i], prev_features[i])
-    # return smooth_l1_loss(features, prev_features, beta=0.1, reduction='mean')
     return loss
-    # criterion_kd = Attention()
-    # # criterion_kd = NSTLoss()
-    # # criterion_kd = DistillKL(T=4)
-    # # criterion_kd = FactorTransfer()
-    # loss = criterion_kd(features, prev_features)
-    # loss = torch.stack(loss, dim=0).sum()
-    # return loss

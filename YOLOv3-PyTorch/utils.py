@@ -5,12 +5,11 @@ import numpy as np
 import os
 import random
 import torch
-import random
-from collections import deque
 
 from collections import Counter
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 
 def iou_width_height(boxes1, boxes2):
     """
@@ -221,6 +220,7 @@ def mean_average_precision(
             else:
                 FP[detection_idx] = 1
 
+
         TP_cumsum = torch.cumsum(TP, dim=0)
         FP_cumsum = torch.cumsum(FP, dim=0)
         recalls = TP_cumsum / (total_true_bboxes + epsilon)
@@ -230,7 +230,7 @@ def mean_average_precision(
         # torch.trapz for numerical integration
         average_precisions.append(torch.trapz(precisions, recalls))
 
-    return sum(average_precisions) / len(average_precisions)
+    return sum(average_precisions) / len(average_precisions), average_precisions
 
 
 def plot_image(image, boxes):
@@ -292,7 +292,9 @@ def get_evaluation_bboxes(
     train_idx = 0
     all_pred_boxes = []
     all_true_boxes = []
-    for batch_idx, (x, labels) in enumerate(tqdm(loader)):
+    for batch_idx, images in enumerate(tqdm(loader)):
+        x = images["image"]
+        labels = images["label"]
         x = x.to(device)
 
         with torch.no_grad():
@@ -380,22 +382,23 @@ def check_class_accuracy(model, loader, threshold):
     tot_noobj, correct_noobj = 0, 0
     tot_obj, correct_obj = 0, 0
 
-    for idx, (x, y) in enumerate(tqdm(loader)):
-        if idx == 100:
-            break
+    for idx, images in enumerate(tqdm(loader)):
+        # if idx == 100:
+        #     break
+        x = images["image"]
+        y = images["label"]
         x = x.to(config.DEVICE)
         with torch.no_grad():
             out = model(x)
-        # print(torch.sigmoid(out[2][..., 0][:2]))
+
         for i in range(3):
             y[i] = y[i].to(config.DEVICE)
             obj = y[i][..., 0] == 1 # in paper this is Iobj_i
             noobj = y[i][..., 0] == 0  # in paper this is Iobj_i
-            # print(obj)
+
             correct_class += torch.sum(
                 torch.argmax(out[i][..., 5:][obj], dim=-1) == y[i][..., 5][obj]
             )
-            # print(correct_class)
             tot_class_preds += torch.sum(obj)
 
             obj_preds = torch.sigmoid(out[i][..., 0]) > threshold
@@ -403,11 +406,16 @@ def check_class_accuracy(model, loader, threshold):
             tot_obj += torch.sum(obj)
             correct_noobj += torch.sum(obj_preds[noobj] == y[i][..., 0][noobj])
             tot_noobj += torch.sum(noobj)
-
-    print(f"Class accuracy is: {(correct_class/(tot_class_preds+1e-16))*100:2f}%")
-    print(f"No obj accuracy is: {(correct_noobj/(tot_noobj+1e-16))*100:2f}%")
-    print(f"Obj accuracy is: {(correct_obj/(tot_obj+1e-16))*100:2f}%")
+            test_cls = (correct_class/(tot_class_preds+1e-16))*100
+            test_nobj = (correct_noobj/(tot_noobj+1e-16))*100
+            test_obj = (correct_obj/(tot_obj+1e-16))*100
+    
+    print(f"Class accuracy is: {test_cls:2f}%")
+    print(f"No obj accuracy is: {test_nobj:2f}%")
+    print(f"Obj accuracy is: {test_obj:2f}%")
+    # wandb.log({"test_cls_precision": test_cls, "test_obj_precsion": test_obj})
     model.train()
+    return test_cls, test_obj
 
 
 def get_mean_std(loader):
@@ -441,6 +449,7 @@ def load_base_checkpoint(checkpoint_file, model):
     checkpoint = torch.load(checkpoint_file, map_location=config.DEVICE)
     model.load_state_dict(checkpoint["state_dict"])
 
+
 def load_checkpoint(checkpoint_file, model, optimizer, lr):
     print("=> Loading checkpoint")
     checkpoint = torch.load(checkpoint_file, map_location=config.DEVICE)
@@ -455,13 +464,14 @@ def load_checkpoint(checkpoint_file, model, optimizer, lr):
 
 def get_loaders(train_csv_path, test_csv_path):
     from dataset import YOLODataset
+    classes_all = [i for i in range(config.NUM_CLASSES)]
+    if config.BASE:
+        classes = classes_all[:config.BASE_CLASS]
+    else:
+        # classes = [i for i in range(config.BASE_CLASS + config.NEW_CLASS)]
+        classes = classes_all[-config.NEW_CLASS:]
 
     IMAGE_SIZE = config.IMAGE_SIZE
-    if config.BASE:
-        classes = [i for i in range(config.BASE_CLASS)]
-    else:
-        classes = [19]
-
     train_dataset = YOLODataset(
         train_csv_path,
         transform=config.train_transforms,
@@ -478,7 +488,7 @@ def get_loaders(train_csv_path, test_csv_path):
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = classes
+        filter_dataset = classes if config.BASE else classes_all
     )
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -504,7 +514,6 @@ def get_loaders(train_csv_path, test_csv_path):
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = classes,
     )
     train_eval_loader = DataLoader(
         dataset=train_eval_dataset,
@@ -516,6 +525,115 @@ def get_loaders(train_csv_path, test_csv_path):
     )
 
     return train_loader, test_loader, train_eval_loader
+
+
+def get_image_store_load(x_store, test_csv_path):
+    from dataset import ImageStore, YOLODataset
+    if config.BASE:
+        classes = [i for i in range(config.BASE_CLASS)]
+    else:
+        classes = [i for i in range(config.BASE_CLASS + config.NEW_CLASS)]
+    IMAGE_SIZE = config.IMAGE_SIZE
+    img_store_dataset = ImageStore(
+        instances=x_store,
+        anchors=config.ANCHORS,
+        transform=config.train_transforms,
+        S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
+        filter_dataset = classes
+    )
+    test_dataset = YOLODataset(
+        test_csv_path,
+        transform=config.test_transforms,
+        S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
+        img_dir=config.IMG_DIR,
+        label_dir=config.LABEL_DIR,
+        anchors=config.ANCHORS,
+        filter_dataset = classes
+    )
+    loader = DataLoader(
+        dataset=img_store_dataset,
+        batch_size=config.BATCH_SIZE_FINETUNE,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.PIN_MEMORY,
+        shuffle=True,
+        drop_last=False,
+    )
+    test_loader = DataLoader(
+        dataset=test_dataset,
+        batch_size=config.BATCH_SIZE,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.PIN_MEMORY,
+        shuffle=False,
+        drop_last=False,
+    )
+    return loader, test_loader
+
+import numpy as np 
+
+def preprocessing_image(x_store, filter_dataset):
+    import config
+    from PIL import Image, ImageFile
+    anchors = config.ANCHORS
+    anchors = torch.tensor(anchors[0] + anchors[1] + anchors[2])
+    num_anchors = anchors.shape[0]
+    num_anchors_per_scale = num_anchors // 3
+    IMAGE_SIZE = config.IMAGE_SIZE
+    S_anchor = [IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8]
+    ignore_iou_thresh = 0.5
+    x_list = list()
+    y_0_list = list()
+    y_1_list = list()
+    y_2_list = list()
+    for img in x_store:
+        img_path = img.img_path
+        label_path = img.label_path
+        image = np.array(Image.open(img_path).convert("RGB"))
+        bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        if filter_dataset:
+            bboxes = [box for box in bboxes if int(box[-1]) in filter_dataset]
+        augmentations = config.train_transforms(image=image, bboxes=bboxes)
+        image = augmentations["image"]
+        bboxes = augmentations["bboxes"]
+        targets = [torch.zeros((num_anchors // 3, S, S, 6)) for S in S_anchor]
+        for box in bboxes:
+            iou_anchors = iou_width_height(torch.tensor(box[2:4]), anchors)
+            anchor_indices = iou_anchors.argsort(descending=True, dim=0)
+            x, y, width, height, class_label = box
+            has_anchor = [False] * 3  # each scale should have one anchor
+            for anchor_idx in anchor_indices:
+                scale_idx = torch.div(anchor_idx, num_anchors_per_scale, rounding_mode='trunc')
+                anchor_on_scale = anchor_idx % num_anchors_per_scale
+                S = S_anchor[scale_idx]
+                i, j = int(S * y), int(S * x)  # which cell
+                anchor_taken = targets[scale_idx][anchor_on_scale, i, j, 0]
+                if not anchor_taken and not has_anchor[scale_idx]:
+                    targets[scale_idx][anchor_on_scale, i, j, 0] = 1
+                    x_cell, y_cell = S * x - j, S * y - i  # both between [0,1]
+                    width_cell, height_cell = (
+                        width * S,
+                        height * S,
+                    )  # can be greater than 1 since it's relative to cell
+                    box_coordinates = torch.tensor(
+                        [x_cell, y_cell, width_cell, height_cell]
+                    )
+                    targets[scale_idx][anchor_on_scale, i, j, 1:5] = box_coordinates
+                    targets[scale_idx][anchor_on_scale, i, j, 5] = int(class_label)
+                    has_anchor[scale_idx] = True
+
+                elif not anchor_taken and iou_anchors[anchor_idx] > ignore_iou_thresh:
+                    targets[scale_idx][anchor_on_scale, i, j, 0] = -1  # ignore prediction        
+        x_list.append(image.to(config.DEVICE))
+        # y_list.append(tuple(targets))
+        y_0_list.append(targets[0].to(config.DEVICE))
+        y_1_list.append(targets[1].to(config.DEVICE))
+        y_2_list.append(targets[2].to(config.DEVICE))
+    y_0_list = torch.stack(y_0_list)
+    y_1_list = torch.stack(y_1_list)
+    y_2_list = torch.stack(y_2_list)
+    x_list = torch.stack(x_list)
+    # print(y_0_list.shape)
+    y_list = [y_0_list, y_1_list, y_2_list]
+    return x_list, y_list    
 
 def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
     model.eval()
@@ -553,3 +671,8 @@ def seed_everything(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
+
+# def preprocess_image(images):
+#     for img in images:
+#         label_path = 
