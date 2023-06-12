@@ -257,10 +257,10 @@ if __name__ == "__main__":
 
     model = YOLOv3(num_classes=cfg.BASE_CLASS)
     # print(model.type)
-    model.load_darknet_weights(weights_path="yolov3.weights")
-    model.layers[15].pred[1] = CNNBlock(1024, 25 * 3, bn_act=False, kernel_size=1)
-    model.layers[22].pred[1] = CNNBlock(512, 25 * 3, bn_act=False, kernel_size=1)
-    model.layers[29].pred[1] = CNNBlock(256, 25 * 3, bn_act=False, kernel_size=1)
+    # model.load_darknet_weights(weights_path="yolov3.weights")
+    # model.layers[15].pred[1] = CNNBlock(1024, 25 * 3, bn_act=False, kernel_size=1)
+    # model.layers[22].pred[1] = CNNBlock(512, 25 * 3, bn_act=False, kernel_size=1)
+    # model.layers[29].pred[1] = CNNBlock(256, 25 * 3, bn_act=False, kernel_size=1)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     from utils import save_checkpoint, load_checkpoint
 

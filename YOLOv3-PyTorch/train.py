@@ -278,15 +278,15 @@ def main():
     
     if config.FINETUNE_NUM_IMAGE_PER_STORE < 0:
         train_loader, test_loader, train_eval_loader = get_loaders(
-            train_csv_path=config.DATASET + "/train_new.csv", test_csv_path=config.DATASET + "/test.csv"
+            train_csv_path=config.DATASET + "/csv_path/train_new.csv", test_csv_path=config.DATASET + "/csv_path/test.csv"
         )
     else:
-        train_loader, test_loader  = get_image_store_load(x_store, test_csv_path=config.DATASET + "/test.csv"
+        train_loader, test_loader  = get_image_store_load(x_store, test_csv_path=config.DATASET + "/csv_path/test.csv"
         )
     
     
     
-    if config.LOAD_MODEL:
+    if config.LOAD_MODEL or config.BASE:
         load_checkpoint(
             config.CHECKPOINT_FILE, model, optimizer, config.LEARNING_RATE
         )

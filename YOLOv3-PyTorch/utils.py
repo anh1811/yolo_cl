@@ -9,8 +9,18 @@ import torch
 from collections import Counter
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import PIL.Image as Image
 
 
+class Instances():
+    def __init__(
+        self,
+        img_path,
+        label_path
+    ):
+        self.img_path = img_path
+        self.label_path = label_path 
+        
 def iou_width_height(boxes1, boxes2):
     """
     Parameters:
@@ -275,7 +285,7 @@ def plot_image(image, boxes):
             bbox={"color": colors[int(class_pred)], "pad": 0},
         )
 
-    plt.show()
+    plt.savefig("test")
 
 
 def get_evaluation_bboxes(
@@ -659,7 +669,32 @@ def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
         )
         plot_image(x[i].permute(1,2,0).detach().cpu(), nms_boxes)
 
-
+def infer(model, img_path, thresh, iou_thresh, anchors):
+    model.eval()
+    image = np.array(Image.open(img_path).convert("RGB"))
+    # image = image[np.newaxis, :]
+    augmentations = config.infer_transforms(image=image)
+    x = augmentations["image"]
+    x = x.to("cuda")
+    x = torch.reshape(x, [1,3,416,416])
+    print(x.shape)
+    with torch.no_grad():
+        out = model(x)
+        bboxes = [[] for _ in range(x.shape[0])]
+        for i in range(3):
+            batch_size, A, S, _, _ = out[i].shape
+            anchor = anchors[i]
+            boxes_scale_i = cells_to_bboxes(
+                out[i], anchor, S=S, is_preds=True
+            )
+            for idx, (box) in enumerate(boxes_scale_i):
+                bboxes[idx] += box
+    
+    for i in range(batch_size):
+        nms_boxes = non_max_suppression(
+            bboxes[i], iou_threshold=iou_thresh, threshold=thresh, box_format="midpoint",
+        )
+        plot_image(x[i].permute(1,2,0).detach().cpu(), nms_boxes)
 
 def seed_everything(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed)
