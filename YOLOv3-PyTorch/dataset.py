@@ -113,7 +113,7 @@ class YOLODataset(Dataset):
                 augments = preprocessing(image = main_image, bboxes = main_boxes)
                 image = augments["image"]
                 boxes = augments["bboxes"]
-            elif random.random() < 0.7:
+            elif random.random() < 0.5:
                 boxes = []
                 while len(boxes) == 0:
                     image, boxes = self.load_instance(index, preprocessing=preprocessing)
