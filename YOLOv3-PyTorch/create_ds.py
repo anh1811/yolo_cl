@@ -2,12 +2,20 @@ import os
 import numpy as np
 import pandas as pd
 import config
+
+
 label_dir = 'PASCAL_VOC/labels'
-train_dir = 'PASCAL_VOC/train.csv'
-test_dir = 'PASCAL_VOC/test.csv'
+train_dir = 'csv_path/2007_train.csv'
+test_dir = 'csv_path/2007_test.csv'
 
 ds_train = pd.read_csv(train_dir)
 ds_test = pd.read_csv(test_dir)
+
+# ds_train_new = ds_train[ds_train.iloc[:, 0].str.startswith('00')]
+# ds_test_new = ds_test[ds_test.iloc[:, 0].str.startswith('00')]
+
+# ds_train_new.to_csv("csv_path/2007_train.csv", index = False)
+# ds_test_new.to_csv("csv_path/2007_test.csv", index =False)
 only_out_label = []
 path_with_newlb = []
 base_classes = [i for i in range(config.BASE_CLASS)]
@@ -38,7 +46,7 @@ ds_filter_train_base = ds_train.loc[~ds_train.iloc[:,1].isin(only_out_label)]
 ds_filter_train_new = ds_train.loc[ds_train.iloc[:,1].isin(path_with_newlb)]
 ds_filter_test_base = ds_test.loc[~ds_test.iloc[:,1].isin(only_out_label)]
 ds_filter_test_new = ds_test.loc[ds_test.iloc[:,1].isin(path_with_newlb)]
-ds_filter_train_base.to_csv(f"csv_path/{config.BASE_CLASS}_{config.NEW_CLASS}_train_base.csv", index = False)
-ds_filter_train_new.to_csv(f"csv_path/{config.BASE_CLASS}_{config.NEW_CLASS}_train_new.csv", index = False)
-ds_filter_test_base.to_csv(f"csv_path/{config.BASE_CLASS}_{config.NEW_CLASS}_test_base.csv", index = False)
-ds_filter_test_new.to_csv(f"csv_path/{config.BASE_CLASS}_{config.NEW_CLASS}_test_new.csv", index = False)
+ds_filter_train_base.to_csv(f"csv_path/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_train_base.csv", index = False)
+ds_filter_train_new.to_csv(f"csv_path/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_train_new.csv", index = False)
+ds_filter_test_base.to_csv(f"csv_path/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_test_base.csv", index = False)
+ds_filter_test_new.to_csv(f"csv_path/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_test_new.csv", index = False)

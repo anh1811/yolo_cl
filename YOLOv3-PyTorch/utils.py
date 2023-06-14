@@ -285,7 +285,7 @@ def plot_image(image, boxes):
             bbox={"color": colors[int(class_pred)], "pad": 0},
         )
 
-    plt.savefig("test")
+    plt.savefig("test.png")
 
 
 def get_evaluation_bboxes(
@@ -472,10 +472,10 @@ def load_checkpoint(checkpoint_file, model, optimizer, lr):
         param_group["lr"] = lr
 
 
-def get_loaders(train_csv_path, test_csv_path):
+def get_loaders(train_csv_path, test_csv_path, x_store, base = False):
     from dataset import YOLODataset
     classes_all = [i for i in range(config.NUM_CLASSES)]
-    if config.BASE:
+    if base:
         classes = classes_all[:config.BASE_CLASS]
     else:
         # classes = [i for i in range(config.BASE_CLASS + config.NEW_CLASS)]
@@ -484,9 +484,11 @@ def get_loaders(train_csv_path, test_csv_path):
     IMAGE_SIZE = config.IMAGE_SIZE
     train_dataset = YOLODataset(
         train_csv_path,
+        instance = x_store,
         transform=config.train_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
+        train = True,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
         filter_dataset = classes
@@ -498,7 +500,7 @@ def get_loaders(train_csv_path, test_csv_path):
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = classes if config.BASE else classes_all
+        filter_dataset = classes if base else classes_all
     )
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -601,7 +603,9 @@ def preprocessing_image(x_store, filter_dataset):
         bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
         if filter_dataset:
             bboxes = [box for box in bboxes if int(box[-1]) in filter_dataset]
-        augmentations = config.train_transforms(image=image, bboxes=bboxes)
+        train_preprocess = config.train_preprocess()
+        preprocessing = train_preprocess(image=image, bboxes=bboxes)
+        augmentations = config.train_transforms(image=preprocessing["image"], bboxes=preprocessing["bboxes"])
         image = augmentations["image"]
         bboxes = augmentations["bboxes"]
         targets = [torch.zeros((num_anchors // 3, S, S, 6)) for S in S_anchor]

@@ -33,6 +33,7 @@ class YOLODataset(Dataset):
         image_size=416,
         S=[13, 26, 52],
         C=20,
+        train = False,
         instance = None,
         preprocessing = None,
         transform=None,
@@ -40,7 +41,7 @@ class YOLODataset(Dataset):
         auxilary = None,
     ):
         self.annotations = pd.read_csv(csv_file)
-
+        self.train = train
         self.preprocessing = preprocessing
         # self.auxilary = auxilary
         self.img_dir = img_dir
@@ -83,7 +84,7 @@ class YOLODataset(Dataset):
         final_labels = []
 
         # random.shuffle(indices)
-        for i, index in enumerate(indices):
+        for i, id in enumerate(indices):
             if i == 0:    # top left
                 x1a, y1a, x2a, y2a =  0,  0, xc, yc
                 delta_x = s - xc
@@ -109,16 +110,20 @@ class YOLODataset(Dataset):
                 width= s - xc
             preprocessing = config.train_preprocess(height=height, width=width)
             #load instaces or images
+            if config.BASE:
+                p = 1
+            else:
+                p = random.random()
+                
             if i == index_of_main_image:
                 augments = preprocessing(image = main_image, bboxes = main_boxes)
                 image = augments["image"]
                 boxes = augments["bboxes"]
-            elif random.random() < 0.5:
+            elif p < 0.5:
                 boxes = []
-                while len(boxes) == 0:
-                    image, boxes = self.load_instance(index, preprocessing=preprocessing)
+                image, boxes = self.load_instance(id, preprocessing=preprocessing)
             else:
-                image, boxes, _, _ = self.load_bboxes_image(index)
+                image, boxes, _, _ = self.load_bboxes_image(id)
                 augments = preprocessing(image = image, bboxes = boxes)
                 image = augments["image"]
                 boxes = augments["bboxes"]
@@ -190,6 +195,8 @@ class YOLODataset(Dataset):
     
     def load_instance(self, index, preprocessing):
         label_path = self.instances[index].label_path.split('/')[-1]
+        # print(label_path)
+        # print(len(self.instances))
         label_path = os.path.join(config.DATASET + '/labels', label_path)
         bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
         # print(label_path)
@@ -203,7 +210,6 @@ class YOLODataset(Dataset):
         # print(bboxes)
         # bboxes = np.asarray(bboxes)
         image = np.array(Image.open(img_path).convert("RGB"))
-
 
         
         augmentations = preprocessing(image=image, bboxes=bboxes)
@@ -256,15 +262,25 @@ class YOLODataset(Dataset):
         # print(self.filter_dataset)
         
         image, bboxes, label_path, img_path = self.load_bboxes_image(index)
-        if self.preprocessing:
-            augmentations = self.preprocessing(image=image, bboxes=bboxes)
-            image = augmentations["image"]
-            bboxes = augmentations["bboxes"]
+        # if self.preprocessing:
+        #     augmentations = self.preprocessing(image=image, bboxes=bboxes)
+        #     image = augmentations["image"]
+        #     bboxes = augmentations["bboxes"]
         # print(bboxes.type)
         # if random.random() < 0.5:
-        if True:
+        if self.train and self.instances is not None:
             #load random instance from the image store
             image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)
+        else:
+            train_preprocess = config.train_preprocess()
+            preprocessing = train_preprocess(image=image, bboxes=bboxes)
+            image = preprocessing["image"]
+            bboxes = preprocessing["bboxes"]
+        # else:
+        #     preprocessing = self._preprocess()
+        #     preprocess = preprocessing(image=image, bboxes=bboxes)
+        #     image = preprocess["image"]
+        #     bboxes = preprocess["bboxes"]
             # print(bboxes)
             #perform mosaice on the image + instance 
         if self.transform:
@@ -347,10 +363,11 @@ class ImageStore(Dataset):
         
         image = np.array(Image.open(img_path).convert("RGB"))
 
-        if self.transform:
-            augmentations = self.transform(image=image, bboxes=bboxes)
-            image = augmentations["image"]
-            bboxes = augmentations["bboxes"]
+        train_preprocess = config.train_preprocess()
+        preprocessing = train_preprocess(image=image, bboxes=bboxes)
+        augmentations = config.train_transforms(image=preprocessing["image"], bboxes=preprocessing["bboxes"])
+        image = augmentations["image"]
+        bboxes = augmentations["bboxes"]
 
         # Below assumes 3 scale predictions (as paper) and same num of anchors per scale
         targets = [torch.zeros((self.num_anchors // 3, S, S, 6)) for S in self.S]
@@ -395,7 +412,7 @@ def test():
     
     transform = config.test_transforms
     IMAGE_SIZE = 32
-    file_path = os.path.join('./weights', f'image_store_base_15_5.pth')
+    file_path = os.path.join('./weighs_final', f'image_store_base_15_5.pth')
 
     print("Finetuning")
     if os.path.exists(file_path):
@@ -405,7 +422,7 @@ def test():
         x_store = image_store.retrieve()
     
     dataset = YOLODataset(
-        'csv_path/19_1_train_new.csv',
+        '19_1_train_new.csv',
         instance= x_store,
         transform=config.train_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],

@@ -22,7 +22,8 @@ from utils import (
     seed_everything,
     load_base_checkpoint,
     get_image_store_load,
-    preprocessing_image
+    preprocessing_image,
+    Instances
 )
 from loss import YoloLoss, feature_distillation, loss_logits_dummy
 from adan import Adan
@@ -30,14 +31,7 @@ torch.backends.cudnn.benchmark = True
 
 
 
-class Instances():
-    def __init__(
-        self,
-        img_path,
-        label_path
-    ):
-        self.img_path = img_path
-        self.label_path = label_path 
+
 # # wandb.init(project="my-project-name", entity="my-username")
 # wandb.login(key="54aca131fa840c635c1b70e1e9aca363c47a21bd")
 # # logger = WandbLogger(project="YOLOv3")
@@ -52,9 +46,9 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
     is_base = config.BASE
     distill_ft = config.DISTILL_FEATURES
     distill_logit = config.DISTILL_LOGITS
-    gamma = 0.5
-    if epoch >= 60:
-        gamma = 0.1
+    gamma = 0.4
+    # if epoch >= 50:
+    #     gamma = 0.5
     # print(image_store)
     for batch_idx, images in enumerate(loop):
         x = images["image"]
@@ -130,11 +124,12 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
 
         with torch.cuda.amp.autocast():
             out = model(x)
+            # print(out[0].shape)
 #             print(y0.shape)
             if not is_base and config.DISTILL:
                 prev_out = base_model(x)
                 features = model.get_features()
-                prev_features = model.get_features()
+                prev_features = base_model.get_features()
                 loss_distill = 0
                 if distill_ft:
                     loss_distill += feature_distillation(prev_features, features)
@@ -175,6 +170,7 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
             scaler.step(optimizer)
             scaler.update()
         else:
+            image_store = update_image_store(image_store, images)
             losses.append(loss.item())
             optimizer.zero_grad()
             scaler.scale(loss).backward()
@@ -208,9 +204,9 @@ def update_image_store(image_store, images):
         gt_classes_all = bboxes[:, -1].tolist()
         if config.BASE:
             # print(image_paths)
-            gt_classes = [i for i in gt_classes_all if i != 19.]
+            gt_classes = [i for i in range(config.BASE_CLASS)]
         else:
-            gt_classes = [i for i in gt_classes_all if i == 19.]
+            gt_classes = [i for i in range(config.BASE_CLASS, config.NUM_CLASSES)]
         cls = int(gt_classes[random.randrange(0, len(gt_classes))])
         # print(cls)
         # print(ins.label_path)
@@ -221,8 +217,14 @@ def update_image_store(image_store, images):
 def main():
     seed_everything()
     image_store = None
+    x_base_store = None
     base = None
-    exp = 'Base_ml_stochweight_fintune_19_1'
+    if config.BASE:
+        exp = f'2007_base_{config.BASE_CLASS}_{config.NEW_CLASS}'
+    elif config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
+        exp = f'2007_finetune_{config.BASE_CLASS}_{config.NEW_CLASS}'
+    else:
+        exp = f'2007_task2_{config.BASE_CLASS}_{config.NEW_CLASS}'
     existing_exp = mlflow.get_experiment_by_name(exp)
     if not existing_exp:
         mlflow.create_experiment(exp)
@@ -230,63 +232,90 @@ def main():
     experiment_id = experiment.experiment_id
     # avg_score = {"loss": 0, "mAP": 0, "AP_newclass": 0}
 
-    if config.WARP:
-        file_path = os.path.join(config.IMAGE_STORE_LOC, 'image_store_19.pth')
-        if os.path.exists(file_path):
-            with open(file_path, "rb") as f:
-                image_store = torch.load(f)
-                # print(image_store)
-                # print(len(image_store.retrieve()))
-        else:
-            image_store = Store(config.NUM_CLASSES, config.NUM_IMAGES_PER_CLASS)
+    # if config.WARP:
+    file_path = os.path.join(config.IMAGE_STORE_LOC, f'2007_image_store_base_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
+    if os.path.exists(file_path):
+        print(f"Open Image Store {file_path}")
+        with open(file_path, "rb") as f:
+            image_store = torch.load(f)
+            # print(image_store)
+            # print(len(image_store.retrieve())
+        x_base_store = image_store.retrieve()
+        print(f"Length of this Image store {len(x_base_store)}")
+    else:
+        print("Create Image Store")
+        image_store = Store(config.NUM_CLASSES, config.NUM_IMAGES_PER_CLASS)
+        x_base_store = None
     
     if config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
-        file_path = os.path.join(config.IMAGE_STORE_LOC, 'image_store_20.pth')
+        file_path = os.path.join(config.IMAGE_STORE_LOC, f'image_store_task2_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
+        print("Finetuning")
         if os.path.exists(file_path):
+            print(f"Open Image Store {file_path}")
             with open(file_path, "rb") as f:
                 image_store = torch.load(f)
             x_store = image_store.retrieve()
+            print(f"Length of this Image store {len(x_store)}")
                 # print(image_store)
                 # print(len(image_store.retrieve()))
         else:
             raise ValueError
-    
+
     model = YOLOv3(num_classes=config.BASE_CLASS).to(config.DEVICE)
     optimizer = Adan(params = model.parameters(), lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
     loss_fn = YoloLoss()
     scaler = torch.cuda.amp.GradScaler()
-        
+       
     if config.DISTILL and not config.BASE:
+        
         base = YOLOv3(num_classes=config.BASE_CLASS).to(config.DEVICE)
         load_base_checkpoint(config.BASE_CHECK_POINT, base)
         for param in base.parameters():
                 param.requires_grad = False
-        
+        print("Load Base model")
         '''load base model need to build later because dont know what to save in base model  '''
         # model.base_model = base
     
     # reload test and train
 
     if not config.BASE:
+        print("Load weight from previous task")
         load_checkpoint(
-            config.CHECKPOINT_FILE, model, optimizer, config.LEARNING_RATE
+            config.BASE_CHECK_POINT, model, optimizer, config.LEARNING_RATE
         )
         model.adaptation(layer_id = 15, num_class = config.NUM_CLASSES, in_feature = 1024, old_class = config.BASE_CLASS)
         model.adaptation(layer_id = 22, num_class = config.NUM_CLASSES, in_feature = 512, old_class = config.BASE_CLASS)
         model.adaptation(layer_id = 29, num_class = config.NUM_CLASSES, in_feature = 256, old_class = config.BASE_CLASS) 
         model.to(config.DEVICE)
-    
-    if config.FINETUNE_NUM_IMAGE_PER_STORE < 0:
-        train_loader, test_loader, train_eval_loader = get_loaders(
-            train_csv_path=config.DATASET + "/csv_path/train_new.csv", test_csv_path=config.DATASET + "/csv_path/test.csv"
-        )
     else:
-        train_loader, test_loader  = get_image_store_load(x_store, test_csv_path=config.DATASET + "/csv_path/test.csv"
+        print("Load pretrainweight from darknet")
+        load_checkpoint(
+            config.CHECKPOINT_FILE, model, optimizer, config.LEARNING_RATE
+        )
+
+    if config.FINETUNE_NUM_IMAGE_PER_STORE < 0:
+        if config.BASE:
+            print("Start Task 1:")
+            train_loader, test_loader, train_eval_loader = get_loaders(
+                train_csv_path=config.DATASET + f"/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_train_base.csv", test_csv_path=config.DATASET +\
+                 f"/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_test_base.csv", x_store = x_base_store, base = config.BASE
+            )
+        else:
+            print("Start Task 2:")
+            train_loader, test_loader, train_eval_loader = get_loaders(
+                train_csv_path=config.DATASET + f"/2007_{config.BASE_CLASS}_{config.NEW_CLASS}_train_new.csv", test_csv_path=config.DATASET + "/2007_test.csv",\
+                x_store = x_base_store, base = config.BASE
+            )
+            # print("Fin")
+    else:
+        print("Load dataset for finetune:")
+        train_loader, test_loader  = get_image_store_load(x_store, test_csv_path=config.DATASET + "/test.csv"
         )
     
     
     
-    if config.LOAD_MODEL or config.BASE:
+    if config.LOAD_MODEL:
+        print("Load check point")
         load_checkpoint(
             config.CHECKPOINT_FILE, model, optimizer, config.LEARNING_RATE
         )
@@ -316,7 +345,7 @@ def main():
     # print("On Train Eval loader:")
     # check_class_accuracy(model, test_loader, threshold=config.CONF_THRESHOLD)
     mAP_best = 0
-    mAP_19 = 0
+    mAP_new_best = 0
     # check_class_accuracy(model, test_loader, threshold=config.CONF_THRESHOLD)
     # print(config.NUM_EPOCHS)
     with mlflow.start_run(experiment_id=experiment_id):
@@ -354,25 +383,34 @@ def main():
                 )
                 print(f"MAP: {mapval.item()}")
                 print(ap_all)
+                new_ap = list(ap_all[-config.NEW_CLASS:])
+                learn_ap = sum(new_ap)/len(new_ap)
+
                 mlflow.log_metric("MAP", mapval.item(), step=epoch)
-                mlflow.log_metric("ap_19", ap_all[-1], step=epoch)
-                
+                mlflow.log_metric("AP_NEW", learn_ap, step=epoch)
+                # mlflow.log_metric("ap_15", ap_all[-5], step=epoch)
+                # mlflow.log_metric("ap_16", ap_all[-4], step=epoch)
+                # mlflow.log_metric("ap_17", ap_all[-3], step=epoch)
+                # mlflow.log_metric("ap_18", ap_all[-2], step=epoch)
+                # mlflow.log_metric("ap_19", ap_all[-1], step=epoch)
                 # print(f"test_cls_precsion: {test_cls}, test_obj: {test_obj}")
                 # wandb.log({"test_cls_precision": test_cls, "test_obj_precsion": test_obj, "MAP": mapval.item()})
 
                 if mapval > mAP_best:
-                    save_checkpoint(model, optimizer, filename=f"weights/{exp}_mAP.pth.tar")
+                    save_checkpoint(model, optimizer, filename=f"weights/{exp}_mAP_{config.BASE_CLASS}_{config.NEW_CLASS}.pth.tar")
                     mAP_best = mapval
-                    mlflow.log_artifact(f"weights/{exp}_mAP.pth.tar")
-                if ap_all[-1] > mAP_19:
-                    save_checkpoint(model, optimizer, filename=f"weights/{exp}_AP19.pth.tar")
-                    mAP_19 = float(ap_all[-1])
-                    mlflow.log_artifact(f"weights/{exp}_AP19.pth.tar")
-    file_path = os.path.join(config.IMAGE_STORE_LOC, 'image_store_20.pth')
+                    mlflow.log_artifact(f"weights/{exp}_mAP_{config.BASE_CLASS}_{config.NEW_CLASS}.pth.tar")
+                if learn_ap > mAP_new_best:
+                    save_checkpoint(model, optimizer, filename=f"weights/{exp}_AP{config.NEW_CLASS}.pth.tar")
+                    mAP_new_best = learn_ap
+                    mlflow.log_artifact(f"weights/{exp}_AP{config.NEW_CLASS}.pth.tar")
+    if config.BASE:
+        file_path = os.path.join(config.IMAGE_STORE_LOC, f'2007_image_store_base_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
+    else:
+        file_path = os.path.join(config.IMAGE_STORE_LOC, f'2007_image_store_task2_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
     if image_store is not None:
         with open(file_path, "wb") as f:
             torch.save(image_store, f)
-
+    mlflow.log_artifact(file_path)
 if __name__ == "__main__":
     main()
-    
