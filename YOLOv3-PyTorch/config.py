@@ -12,7 +12,7 @@ NUM_WORKERS = 8
 BATCH_SIZE = 32
 IMAGE_SIZE = 416
 NUM_CLASSES = 20
-LEARNING_RATE = 3e-6
+LEARNING_RATE = 1e-5
 WEIGHT_DECAY = 3e-5
 NUM_EPOCHS = 100
 CONF_THRESHOLD = 0.5
@@ -64,7 +64,8 @@ ANCHORS = [
 
 
 scale = 1.1
-def train_preprocess(height, width):
+
+def train_preprocess(height = IMAGE_SIZE, width = IMAGE_SIZE):
     max_size = max(height, width)
     return A.Compose(
         [
@@ -96,7 +97,6 @@ def train_preprocess(height, width):
         ],
         bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
     )
-
 
 
 train_transforms = A.Compose(

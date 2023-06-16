@@ -2,6 +2,8 @@
 Main file for training Yolo model on Pascal VOC and COCO dataset
 """
 # import wandb
+import warnings
+warnings.filterwarnings("ignore")
 import config
 import torch
 import torch.optim as optim
@@ -158,8 +160,12 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
             distill_losses.append(loss_distill.item())
             yolo_losses.append(loss_yolo.item())
 
-        if config.WARP:
+        if config.FINETUNE_NUM_IMAGE_PER_STORE < 0:
+            #not update of finetuning
             image_store = update_image_store(image_store, images)
+
+        if config.WARP:
+            # image_store = update_image_store(image_store, images)
             losses.append(loss.item())
             optimizer.zero_grad()
             scaler.scale(loss).backward()
@@ -170,7 +176,7 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
             scaler.step(optimizer)
             scaler.update()
         else:
-            image_store = update_image_store(image_store, images)
+            # image_store = update_image_store(image_store, images)
             losses.append(loss.item())
             optimizer.zero_grad()
             scaler.scale(loss).backward()
@@ -234,7 +240,7 @@ def main():
 
     # if config.WARP:
     file_path = os.path.join(config.IMAGE_STORE_LOC, f'2007_image_store_base_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
-    if os.path.exists(file_path):
+    if os.path.exists(file_path) and not config.BASE:
         print(f"Open Image Store {file_path}")
         with open(file_path, "rb") as f:
             image_store = torch.load(f)
@@ -248,7 +254,7 @@ def main():
         x_base_store = None
     
     if config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
-        file_path = os.path.join(config.IMAGE_STORE_LOC, f'image_store_task2_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
+        file_path = os.path.join(config.IMAGE_STORE_LOC, f'2007_image_store_task2_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
         print("Finetuning")
         if os.path.exists(file_path):
             print(f"Open Image Store {file_path}")
@@ -308,6 +314,8 @@ def main():
             )
             # print("Fin")
     else:
+        print("Load check point task 2")
+        load_base_checkpoint(config.CHECKPOINT_FILE, model)
         print("Load dataset for finetune:")
         train_loader, test_loader  = get_image_store_load(x_store, test_csv_path=config.DATASET + "/test.csv"
         )
@@ -348,6 +356,7 @@ def main():
     mAP_new_best = 0
     # check_class_accuracy(model, test_loader, threshold=config.CONF_THRESHOLD)
     # print(config.NUM_EPOCHS)
+    # print(optimizer.state_dict())
     with mlflow.start_run(experiment_id=experiment_id):
         mlflow.log_artifacts("code")
         for epoch in range(config.NUM_EPOCHS):
@@ -404,6 +413,53 @@ def main():
                     save_checkpoint(model, optimizer, filename=f"weights/{exp}_AP{config.NEW_CLASS}.pth.tar")
                     mAP_new_best = learn_ap
                     mlflow.log_artifact(f"weights/{exp}_AP{config.NEW_CLASS}.pth.tar")
+
+    print("On Test loader:")
+    test_cls, test_obj = check_class_accuracy(model, test_loader, threshold=config.CONF_THRESHOLD)
+    # check_class_accuracy(base, test_loader, threshold=config.CONF_THRESHOLD)
+#             wandb.log({"test_cls_precision": test_cls, "test_obj_precsion": test_obj})
+    mlflow.log_metric("test_cls_precision", test_cls, step=epoch)
+    mlflow.log_metric("test_obj_precision", test_obj, step=epoch)
+
+    pred_boxes, true_boxes = get_evaluation_bboxes(
+        test_loader,
+        model,
+        iou_threshold=config.NMS_IOU_THRESH,
+        anchors=config.ANCHORS,
+        threshold=config.CONF_THRESHOLD,
+    )
+    mapval, ap_all = mean_average_precision(
+        pred_boxes,
+        true_boxes,
+        iou_threshold=config.MAP_IOU_THRESH,
+        box_format="midpoint",
+        num_classes=config.BASE_CLASS if config.BASE else config.NUM_CLASSES,
+    )
+    print(f"MAP: {mapval.item()}")
+    print(ap_all)
+    new_ap = list(ap_all[-config.NEW_CLASS:])
+    learn_ap = sum(new_ap)/len(new_ap)
+
+    mlflow.log_metric("MAP", mapval.item(), step=epoch)
+    mlflow.log_metric("AP_NEW", learn_ap, step=epoch)
+    # mlflow.log_metric("ap_15", ap_all[-5], step=epoch)
+    # mlflow.log_metric("ap_16", ap_all[-4], step=epoch)
+    # mlflow.log_metric("ap_17", ap_all[-3], step=epoch)
+    # mlflow.log_metric("ap_18", ap_all[-2], step=epoch)
+    # mlflow.log_metric("ap_19", ap_all[-1], step=epoch)
+    # print(f"test_cls_precsion: {test_cls}, test_obj: {test_obj}")
+    # wandb.log({"test_cls_precision": test_cls, "test_obj_precsion": test_obj, "MAP": mapval.item()})
+
+    if mapval > mAP_best:
+        save_checkpoint(model, optimizer, filename=f"weights/{exp}_mAP_{config.BASE_CLASS}_{config.NEW_CLASS}.pth.tar")
+        mAP_best = mapval
+        mlflow.log_artifact(f"weights/{exp}_mAP_{config.BASE_CLASS}_{config.NEW_CLASS}.pth.tar")
+    if learn_ap > mAP_new_best:
+        save_checkpoint(model, optimizer, filename=f"weights/{exp}_AP{config.NEW_CLASS}.pth.tar")
+        mAP_new_best = learn_ap
+        mlflow.log_artifact(f"weights/{exp}_AP{config.NEW_CLASS}.pth.tar")
+    
+
     if config.BASE:
         file_path = os.path.join(config.IMAGE_STORE_LOC, f'2007_image_store_base_{config.BASE_CLASS}_{config.NEW_CLASS}.pth')
     else:

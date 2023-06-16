@@ -261,7 +261,8 @@ if __name__ == "__main__":
     # model.layers[15].pred[1] = CNNBlock(1024, 25 * 3, bn_act=False, kernel_size=1)
     # model.layers[22].pred[1] = CNNBlock(512, 25 * 3, bn_act=False, kernel_size=1)
     # model.layers[29].pred[1] = CNNBlock(256, 25 * 3, bn_act=False, kernel_size=1)
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    from adan import Adan
+    optimizer = Adan(model.parameters(), lr=1e-4)
     from utils import save_checkpoint, load_checkpoint
 
     # checkpoint = {"state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}

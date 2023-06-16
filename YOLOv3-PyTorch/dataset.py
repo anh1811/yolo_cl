@@ -74,10 +74,15 @@ class YOLODataset(Dataset):
         # list_wout_mindex = self.instances.copy()
         # list_wout_mindex.remove(main_index)
         indices = [main_index]
-        while main_index in indices:
-            indices = random.sample(range(len(self.instances)), 4)
-            index_of_main_image = random.randint(0,3)
-
+        if self.instances is not None:
+            while main_index in indices:
+                indices = random.sample(range(len(self.instances)), 4)
+                index_of_main_image = random.randint(0,3)
+        else:
+            while main_index in indices:
+                # print(len(self.annotations))
+                indices = random.sample(range(len(self.annotations)), 4)
+                index_of_main_image = random.randint(0,3)
 
         mosaic_image = np.zeros((s, s, 3), dtype=np.float32)
         final_boxes  = []
@@ -123,6 +128,7 @@ class YOLODataset(Dataset):
                 boxes = []
                 image, boxes = self.load_instance(id, preprocessing=preprocessing)
             else:
+                # print("using mosaic")
                 image, boxes, _, _ = self.load_bboxes_image(id)
                 augments = preprocessing(image = image, bboxes = boxes)
                 image = augments["image"]
@@ -268,14 +274,15 @@ class YOLODataset(Dataset):
         #     bboxes = augmentations["bboxes"]
         # print(bboxes.type)
         # if random.random() < 0.5:
-        if self.train and self.instances is not None:
+        if self.train:
+            if self.instances is not None:
             #load random instance from the image store
-            image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)
-        else:
-            train_preprocess = config.train_preprocess()
-            preprocessing = train_preprocess(image=image, bboxes=bboxes)
-            image = preprocessing["image"]
-            bboxes = preprocessing["bboxes"]
+                image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)
+            else:
+                train_preprocess = config.train_preprocess()
+                preprocessing = train_preprocess(image=image, bboxes=bboxes)
+                image = preprocessing["image"]
+                bboxes = preprocessing["bboxes"]
         # else:
         #     preprocessing = self._preprocess()
         #     preprocess = preprocessing(image=image, bboxes=bboxes)
@@ -349,23 +356,192 @@ class ImageStore(Dataset):
 
     def __len__(self):
         return len(self.images)
+    
+    def load_mosaic_image_and_boxes(self, main_index, s=416, 
+                                    scale_range=[0.3, 0.7], maxfrac=0.75):
+        self.mosaic_size = s
+        scale_x = scale_range[0] + random.random() * (scale_range[1] - scale_range[0])
+        scale_y = scale_range[0] + random.random() * (scale_range[1] - scale_range[0])
+        xc = int(scale_x * s)
+        yc = int(scale_y * s)
+ 
+        # random other 3 sample (could be the same too...)
+        # list_wout_mindex = self.instances.copy()
+        # list_wout_mindex.remove(main_index)
+        # indices = [main_index]
+        # while main_index in indices:
+        #     indices = random.sample(range(len(self.instances)), 4)
+        #     index_of_main_image = random.randint(0,3)
+        indices = random.sample(range(len(self.images)), 4) 
+        index_of_main_image = random.randint(0,3)
+        indices[index_of_main_image] = main_index
 
-    def __getitem__(self, index):
-        input_ds = dict()
-        label_path = self.images[index].label_path
+        mosaic_image = np.zeros((s, s, 3), dtype=np.float32)
+        final_boxes  = []
+        final_labels = []
+
+        # random.shuffle(indices)
+        for i, id in enumerate(indices):
+            if i == 0:    # top left
+                x1a, y1a, x2a, y2a =  0,  0, xc, yc
+                delta_x = s - xc
+                delta_y = s - yc
+                height = yc 
+                width = xc
+                # x1b, y1b, x2b, y2b = s - xc, s - yc, s, s # from bottom right
+            elif i == 1:  # top right
+                x1a, y1a, x2a, y2a = xc, 0, s , yc
+                delta_x = s - xc
+                delta_y = s - yc
+                height = yc
+                width= s - xc
+                # x1b, y1b, x2b, y2b = 0, s - yc, s - xc, s # from bottom left
+            elif i == 2:  # bottom left
+                x1a, y1a, x2a, y2a = 0, yc, xc, s
+                height = s - yc
+                width= xc
+                # x1b, y1b, x2b, y2b = s - xc, 0, s, s-yc   # from top right
+            elif i == 3:  # bottom right
+                x1a, y1a, x2a, y2a = xc, yc,  s, s
+                height = s - yc
+                width= s - xc
+            preprocessing = config.train_preprocess(height=height, width=width)
+            #load instaces or images
+            # if config.BASE:
+            #     p = 1
+            # else:
+            #     p = random.random()
+            
+            image, boxes, img_path, label_path = self.load_instance(id, preprocessing=preprocessing)
+            mosaic_image[y1a:y2a, x1a:x2a] = image
+            if len(boxes) == 0:
+                continue
+            boxes = np.asarray(boxes)
+            boxes[:, [0,2]] *= width
+            boxes[:, [1,3]] *= height
+
+            boxes[:, 0] += x1a
+            boxes[:, 1] += y1a
+
+            boxes[:, [0,2]] /= s
+            boxes[:, [1,3]] /= s
+            # print(boxes)
+            # print("this is boxes")
+            # print(boxes)
+            # new_boxes = np.zeros_like(boxes)
+            # print(image.shape)
+            # for bbox in img_annos:
+
+            #x_c,y_c, w, h ->xyxy
+            # new_boxes[:, 0] = boxes[:,0] - boxes[:,2]*0.5
+            # new_boxes[:, 1] = boxes[:,1] - boxes[:,3]*0.5
+            # new_boxes[:, 2] = boxes[:,0] + boxes[:,2]*0.5
+            # new_boxes[:, 3] = boxes[:,1] + boxes[:,3]*0.5
+            # print(f"new_box {new_boxes}")
+            # del bbox
+            
+
+            # calculate and apply box offsets due to replacement            
+            # offset_x = x1a - x1b
+            # offset_y = y1a - y1b
+            # print(offset_x/s, offset_y/s)
+            # new_boxes[:, 0] += offset_x/s
+            # new_boxes[:, 1] += offset_y/s
+            # new_boxes[:, 2] += offset_x/s
+            # new_boxes[:, 3] += offset_y/s
+            # print(new_boxes)
+            # new_boxes[:, :-1] = np.clip(new_boxes[:, :-1], 0.000001, 1.)
+            
+            # print(f"this is {new_boxes}")
+            # boxes[:, 0] = (new_boxes[:,0] + new_boxes[:,2]) / 2.
+            # boxes[:, 1] = (new_boxes[:,1] + new_boxes[:,3]) / 2.
+            # boxes[:, 2] = new_boxes[:,2] - new_boxes[:, 0]
+            # boxes[:, 3] = new_boxes[:,3] - new_boxes[:,1]
+            # print(f"this is {boxes}")
+            # print(y1a, y2a, x1a, x2a)
+            # print(y1b, y2b, x1b, x2b)
+            # cut image, save boxes
+            # print(boxes)
+            
+            final_boxes.append(boxes)
+
+        # collect boxes
+        final_boxes  = np.vstack(final_boxes)
+        # print(final_boxes)
+        # clip boxes to the image area
+        # final_boxes[:, :-1] = np.clip(final_boxes[:, :-1], 0.000001, 1.)
+        
+        # w = (final_boxes[:,2] - final_boxes[:,0])
+        # h = (final_boxes[:,3] - final_boxes[:,1])
+        
+        # discard boxes where w or h <10
+        # final_boxes = final_boxes[(final_boxes[:,2]>=self.size_limit) & (final_boxes[:,3]>=self.size_limit)]
+
+        return mosaic_image, final_boxes, img_path, label_path
+
+    def load_instance(self, index, preprocessing):
+        label_path = self.images[index].label_path.split('/')[-1]
+        # print(label_path)
+        # print(len(self.instances))
+        label_path = os.path.join(config.DATASET + '/labels', label_path)
         bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        # print(label_path)
         # print(len(bboxes))
         # print(self.filter_dataset)
-        if self.filter_dataset:
-            bboxes = [box for box in bboxes if int(box[-1]) in self.filter_dataset]
+        # if self.filter_last_task:
+        #     bboxes = [box for box in bboxes if int(box[-1]) in self.filter_last_task]
             # print(len(bboxes))
-        img_path = self.images[index].img_path
-        
+        img_path = self.images[index].img_path.split('/')[-1]
+        img_path = os.path.join(config.DATASET + '/images', img_path)
+        # print(bboxes)
+        # bboxes = np.asarray(bboxes)
         image = np.array(Image.open(img_path).convert("RGB"))
 
-        train_preprocess = config.train_preprocess()
-        preprocessing = train_preprocess(image=image, bboxes=bboxes)
-        augmentations = config.train_transforms(image=preprocessing["image"], bboxes=preprocessing["bboxes"])
+        
+        augmentations = preprocessing(image=image, bboxes=bboxes)
+        image = augmentations["image"]
+        boxes = augmentations["bboxes"]
+        # if self.preprocessing:
+        #     augmentations = self.preprocessing(image=image, bboxes=bboxes)
+        #     image = augmentations["image"]
+        #     boxes = augmentations["bboxes"]
+
+        # # as pascal voc format
+        # boxes[:, 2] = boxes[:, 0] + boxes[:, 2] # width  to xmax - by: xmin + xmax 
+        # boxes[:, 3] = boxes[:, 1] + boxes[:, 3] # height to ymax - by: ymin + ymax
+        
+        # #resize images and boxes
+        # if size != 1:
+        #     f_y = size/image.shape[0]
+        #     f_x = size/image.shape[1]
+            
+        #     image = cv2.resize(image, (size, size))
+        
+        #     boxes[:, 0] = boxes[:, 0]*f_x
+        #     boxes[:, 2] = boxes[:, 2]*f_x
+        #     boxes[:, 1] = boxes[:, 1]*f_y
+        #     boxes[:, 3] = boxes[:, 3]*f_y
+        
+        return image, boxes, img_path, label_path
+    
+    
+    def __getitem__(self, index):
+        input_ds = dict()
+        # label_path = self.images[index].label_path
+        # bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        # # print(len(bboxes))
+        # # print(self.filter_dataset)
+        # if self.filter_dataset:
+        #     bboxes = [box for box in bboxes if int(box[-1]) in self.filter_dataset]
+        #     # print(len(bboxes))
+        # img_path = self.images[index].img_path
+        
+        # image = np.array(Image.open(img_path).convert("RGB"))
+
+
+
+        image, bboxes, img_path, label_path = self.load_mosaic_image_and_boxes(index)
+        augmentations = config.train_transforms(image=image, bboxes=bboxes)
         image = augmentations["image"]
         bboxes = augmentations["bboxes"]
 
@@ -422,14 +598,15 @@ def test():
         x_store = image_store.retrieve()
     
     dataset = YOLODataset(
-        '19_1_train_new.csv',
-        instance= x_store,
+        '15_5_train_base.csv',
+        instance= None,
         transform=config.train_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = [19],
+        filter_dataset = [i for i in range(15)],
+        train = True
     )
     S = [13, 26, 52]
     scaled_anchors = torch.tensor(anchors) / (
