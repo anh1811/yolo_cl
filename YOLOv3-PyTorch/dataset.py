@@ -275,14 +275,14 @@ class YOLODataset(Dataset):
         # print(bboxes.type)
         # if random.random() < 0.5:
         if self.train:
-            if self.instances is not None:
+            # if self.instances is not None:
             #load random instance from the image store
-                image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)
-            else:
-                train_preprocess = config.train_preprocess()
-                preprocessing = train_preprocess(image=image, bboxes=bboxes)
-                image = preprocessing["image"]
-                bboxes = preprocessing["bboxes"]
+            image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)
+            # else:
+            #     train_preprocess = config.train_preprocess()
+            #     preprocessing = train_preprocess(image=image, bboxes=bboxes)
+            #     image = preprocessing["image"]
+            #     bboxes = preprocessing["bboxes"]
         # else:
         #     preprocessing = self._preprocess()
         #     preprocess = preprocessing(image=image, bboxes=bboxes)
