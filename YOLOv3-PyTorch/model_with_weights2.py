@@ -257,17 +257,17 @@ if __name__ == "__main__":
 
     model = YOLOv3(num_classes=cfg.BASE_CLASS)
     # print(model.type)
-    # model.load_darknet_weights(weights_path="yolov3.weights")
-    # model.layers[15].pred[1] = CNNBlock(1024, 25 * 3, bn_act=False, kernel_size=1)
-    # model.layers[22].pred[1] = CNNBlock(512, 25 * 3, bn_act=False, kernel_size=1)
-    # model.layers[29].pred[1] = CNNBlock(256, 25 * 3, bn_act=False, kernel_size=1)
+    model.load_darknet_weights(weights_path="/storage/anhnn99/cl/YOLOv3-PyTorch-main/weights/yolov3.weights")
+    # model.layers[15].pred[1] = CNNBlock(1024, 20 * 3, bn_act=False, kernel_size=1)
+    # model.layers[22].pred[1] = CNNBlock(512, 20 * 3, bn_act=False, kernel_size=1)
+    # model.layers[29].pred[1] = CNNBlock(256, 20 * 3, bn_act=False, kernel_size=1)
     from adan import Adan
-    optimizer = Adan(model.parameters(), lr=1e-4)
+    optimizer = Adan(model.parameters(), lr=3e-5)
     from utils import save_checkpoint, load_checkpoint
 
     # checkpoint = {"state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-    save_checkpoint(model, optimizer)
-    load_checkpoint('my_checkpoint.pth.tar', model, optimizer, lr= 1e-4)
+    save_checkpoint(model, optimizer, filename=f"my_checkpoint_{cfg.BASE_CLASS}.pth.tar")
+    # load_checkpoint('my_checkpoint.pth.tar', model, optimizer, lr= 1e-4)
     import sys
 
     sys.exit()
