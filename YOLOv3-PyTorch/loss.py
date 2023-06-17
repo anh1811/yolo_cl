@@ -15,7 +15,10 @@ class YoloLoss(nn.Module):
         super().__init__()
         self.mse = nn.MSELoss()
         self.bce = nn.BCEWithLogitsLoss()
-        self.entropy = nn.CrossEntropyLoss(label_smoothing=0.1)
+        if config.BASE or config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
+            self.entropy = nn.CrossEntropyLoss()
+        else:
+            self.entropy = nn.CrossEntropyLoss(label_smoothing=0.2)
         self.sigmoid = nn.Sigmoid()
 
         # Constants signifying how much to pay for each respective part of the loss
@@ -72,7 +75,7 @@ class YoloLoss(nn.Module):
         # ==================== #
 
         anchors = anchors.reshape(1, 3, 1, 1, 2)
-        box_preds = torch.cat([self.sigmoid(predictions[..., 1:3]), torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
+        box_preds = torch.cat([predictions[..., 1:3], torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
         ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj]).detach()
         object_loss = self.bce((predictions[..., 0:1][obj]), (ious * target[..., 0:1][obj]))
 
@@ -102,15 +105,19 @@ class YoloLoss(nn.Module):
         # print("\n")
         if prev_preds is not None:
             loss_distill = class_loss_distill * self.lambda_class + object_loss_distill * self.lambda_obj + box_loss_distill * self.lambda_box
-        else:
-            loss_distill = 0
-        return (
+            return (
             gamma * loss_distill + 
             (1-gamma) * (self.lambda_box * box_loss
             + self.lambda_obj * object_loss
             + self.lambda_noobj * no_object_loss
             + self.lambda_class * class_loss)
-        )
+            )
+        else:
+            return (self.lambda_box * box_loss
+            + self.lambda_obj * object_loss
+            + self.lambda_noobj * no_object_loss
+            + self.lambda_class * class_loss
+            )
 
 def loss_logits_dummy(predictions, prev_preds, anchors):
     sigmoid = nn.Sigmoid()
@@ -125,14 +132,7 @@ def loss_logits_dummy(predictions, prev_preds, anchors):
     lambda_box = 10
     alpha = 2
     #this loss has to be small bcs it will contradict the performance of the model 
-    # no_object_loss = bce(
-    #         (predictions[..., 0:1][noobj]), (prev_preds[..., 0:1][noobj]),
-    #     )
-    # anchors = anchors.reshape(1, 3, 1, 1, 2)
-    #maybe try incorporate this into the loss function because it might help
-    # box_preds = torch.cat([self.sigmoid(predictions[..., 1:3]), torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
-    # prev_box_preds = torch.cat([self.sigmoid(prev_preds[..., 1:3]), torch.exp(prev_preds[..., 3:5]) * anchors], dim=-1)
-    # ious = intersection_over_union(box_preds[obj], prev_box_preds[obj]).detach()
+
     object_loss = bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
 
     # predictions[..., 1:3] = sigmoid(predictions[..., 1:3])  # x,y coordinates
@@ -152,16 +152,10 @@ def loss_logits_dummy(predictions, prev_preds, anchors):
     obj_cls = class_prob > thres
     class_loss = anchor_delta_distillation(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
      prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
-    # class_loss = logit_distillation(
-            # (predictions[..., 5:5+config.BASE_CLASS][obj_cls]), (prev_preds[..., 5:5+config.BASE_CLASS][obj_cls])) 
-    # print(box_loss)
-    # print(object_loss)
-    # # print(no_object_loss)
-    # print(f"class_distill:{lambda_class * class_loss}")
+
     return (
             lambda_box * box_loss
             + lambda_obj * object_loss
-            # + lambda_noobj * no_object_loss
             + lambda_class * class_loss
         )
 
@@ -201,3 +195,71 @@ def feature_distillation(features, prev_features):
     for i in range(3):
         loss += F.mse_loss(features[i], prev_features[i])
     return loss
+
+class OldYoloLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        self.bce = nn.BCEWithLogitsLoss()
+        self.entropy = nn.CrossEntropyLoss()
+        self.sigmoid = nn.Sigmoid()
+
+        # Constants signifying how much to pay for each respective part of the loss
+        self.lambda_class = 1
+        self.lambda_noobj = 10
+        self.lambda_obj = 1
+        self.lambda_box = 10
+
+    def forward(self, predictions, target, anchors):
+        # Check where obj and noobj (we ignore if target == -1)
+        obj = target[..., 0] == 1  # in paper this is Iobj_i
+        noobj = target[..., 0] == 0  # in paper this is Inoobj_i
+
+        # ======================= #
+        #   FOR NO OBJECT LOSS    #
+        # ======================= #
+
+        no_object_loss = self.bce(
+            (predictions[..., 0:1][noobj]), (target[..., 0:1][noobj]),
+        )
+        
+        # ==================== #
+        #   FOR OBJECT LOSS    #
+        # ==================== #
+
+        anchors = anchors.reshape(1, 3, 1, 1, 2)
+        box_preds = torch.cat([self.sigmoid(predictions[..., 1:3]), torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
+        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj]).detach()
+        object_loss = self.bce((predictions[..., 0:1][obj]), (ious * target[..., 0:1][obj]))
+
+        # ======================== #
+        #   FOR BOX COORDINATES    #
+        # ======================== #
+
+        predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])  # x,y coordinates
+        target[..., 3:5] = torch.log(
+            (1e-16 + target[..., 3:5] / anchors)
+        )  # width, height coordinates
+        box_loss = self.mse(predictions[..., 1:5][obj], target[..., 1:5][obj])
+
+        # ================== #
+        #   FOR CLASS LOSS   #
+        # ================== #
+
+        class_loss = self.entropy(
+            (predictions[..., 5:][obj]), (target[..., 5][obj].long()),
+        )
+
+        print("__________________________________")
+        print(self.lambda_box * box_loss)
+        print(self.lambda_obj * object_loss)
+        print(self.lambda_noobj * no_object_loss)
+        print(self.lambda_class * class_loss)
+        print("\n")
+
+        return (
+            self.lambda_box * box_loss
+            + self.lambda_obj * object_loss
+            + self.lambda_noobj * no_object_loss
+            + self.lambda_class * class_loss
+        )

@@ -28,7 +28,7 @@ def main():
     seed_everything()
     model = YOLOv3(num_classes=config.NUM_CLASSES).to(config.DEVICE)
     # model.eval
-    load_base_checkpoint('weights/Base_ml_stochweight_0.1_lm0.1_AP19.pth.tar', model)
+    load_base_checkpoint('weights/finetune_15_5_AP5.pth.tar', model)
     loss_fn = YoloLoss()
     scaler = torch.cuda.amp.GradScaler() 
     # base = None
@@ -44,7 +44,9 @@ def main():
     )
     
     train_loader, test_loader, train_eval_loader = get_loaders(
-        train_csv_path=config.DATASET + "/train_new.csv", test_csv_path=config.DATASET + "/test.csv"
+        train_csv_path="/home/ngocanh/Documents/final_thesis/code/yolo_cl/YOLOv3-PyTorch/csv_path/19_1_test_new.csv",\
+              test_csv_path="/home/ngocanh/Documents/final_thesis/code/yolo_cl/YOLOv3-PyTorch/csv_path/19_1_test_new.csv",\
+              x_store = None
     )
     
     #neu nhu khong phai gia doan base
