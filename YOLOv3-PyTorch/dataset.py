@@ -205,8 +205,8 @@ class YOLODataset(Dataset):
         # print(label_path)
         # print(len(bboxes))
         # print(self.filter_dataset)
-        if self.filter_last_task:
-            bboxes = [box for box in bboxes if int(box[-1]) in self.filter_last_task]
+        # if self.filter_last_task:
+        #     bboxes = [box for box in bboxes if int(box[-1]) in self.filter_last_task]
             # print(len(bboxes))
         img_path = self.instances[index].img_path.split('/')[-1]
         img_path = os.path.join(config.DATASET + '/images', img_path)
@@ -272,7 +272,7 @@ class YOLODataset(Dataset):
         # print(bboxes.type)
         # if random.random() < 0.5:
         if self.train:
-            if random.random() < 0.5:
+            if random.random() < 0.5 and config.MOSAIC:
             # if self.instances is not None:
             #load random instance from the image store
                 image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)

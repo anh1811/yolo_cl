@@ -48,7 +48,7 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
     is_base = config.BASE
     distill_ft = config.DISTILL_FEATURES
     distill_logit = config.DISTILL_LOGITS
-    gamma = 0.4
+    gamma = 0.2
     # if epoch >= 50:
     #     gamma = 0.5
     # print(image_store)
