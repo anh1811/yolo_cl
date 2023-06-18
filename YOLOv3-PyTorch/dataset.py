@@ -73,16 +73,15 @@ class YOLODataset(Dataset):
         # random other 3 sample (could be the same too...)
         # list_wout_mindex = self.instances.copy()
         # list_wout_mindex.remove(main_index)
-        indices = [main_index]
+        # indices = [main_index]
         if self.instances is not None:
-            while main_index in indices:
-                indices = random.sample(range(len(self.instances)), 4)
-                index_of_main_image = random.randint(0,3)
+
+            indices = random.sample(range(len(self.instances)), 4)
+            index_of_main_image = random.randint(0,3)
         else:
-            while main_index in indices:
-                # print(len(self.annotations))
-                indices = random.sample(range(len(self.annotations)), 4)
-                index_of_main_image = random.randint(0,3)
+            # print(len(self.annotations))
+            indices = random.sample(range(len(self.annotations)), 4)
+            index_of_main_image = random.randint(0,3)
 
         mosaic_image = np.zeros((s, s, 3), dtype=np.float32)
         final_boxes  = []
@@ -92,15 +91,11 @@ class YOLODataset(Dataset):
         for i, id in enumerate(indices):
             if i == 0:    # top left
                 x1a, y1a, x2a, y2a =  0,  0, xc, yc
-                delta_x = s - xc
-                delta_y = s - yc
                 height = yc 
                 width = xc
                 # x1b, y1b, x2b, y2b = s - xc, s - yc, s, s # from bottom right
             elif i == 1:  # top right
                 x1a, y1a, x2a, y2a = xc, 0, s , yc
-                delta_x = s - xc
-                delta_y = s - yc
                 height = yc
                 width= s - xc
                 # x1b, y1b, x2b, y2b = 0, s - yc, s - xc, s # from bottom left
@@ -129,6 +124,8 @@ class YOLODataset(Dataset):
                 image, boxes = self.load_instance(id, preprocessing=preprocessing)
             else:
                 # print("using mosaic")
+                if self.instances is not None:
+                    id = random.choice(range(len(self.annotations)))
                 image, boxes, _, _ = self.load_bboxes_image(id)
                 augments = preprocessing(image = image, bboxes = boxes)
                 image = augments["image"]
