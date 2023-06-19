@@ -537,8 +537,11 @@ class ImageStore(Dataset):
         # image = np.array(Image.open(img_path).convert("RGB"))
 
 
-
-        image, bboxes, img_path, label_path = self.load_mosaic_image_and_boxes(index)
+        if random.random() < 0.5 and config.MOSAIC:
+            image, bboxes, img_path, label_path = self.load_mosaic_image_and_boxes(index)
+        else:
+            preprocess = config.train_preprocess()
+            image, bboxes, img_path, label_path = self.load_instance(index, preprocess)
         augmentations = config.train_transforms(image=image, bboxes=bboxes)
         image = augmentations["image"]
         bboxes = augmentations["bboxes"]
