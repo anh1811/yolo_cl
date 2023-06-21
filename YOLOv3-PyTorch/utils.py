@@ -582,7 +582,7 @@ def get_image_store_load(x_store, test_csv_path):
 
 import numpy as np 
 
-def preprocessing_image(x_store, filter_dataset):
+def preprocessing_image(batch, x_store, filter_dataset):
     import config
     from PIL import Image, ImageFile
     anchors = config.ANCHORS
@@ -596,16 +596,20 @@ def preprocessing_image(x_store, filter_dataset):
     y_0_list = list()
     y_1_list = list()
     y_2_list = list()
-    for img in x_store:
-        img_path = img.img_path
-        label_path = img.label_path
-        image = np.array(Image.open(img_path).convert("RGB"))
-        bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+    for img in batch:
+        index = x_store.index(img)
+        # img_path = img.img_path
+        # label_path = img.label_path
+        # image = np.array(Image.open(img_path).convert("RGB"))
+        # bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
         if filter_dataset:
             bboxes = [box for box in bboxes if int(box[-1]) in filter_dataset]
-        train_preprocess = config.train_preprocess()
-        preprocessing = train_preprocess(image=image, bboxes=bboxes)
-        augmentations = config.train_transforms(image=preprocessing["image"], bboxes=preprocessing["bboxes"])
+        if random.random < 0.5:
+            image, bboxes = load_mosaic_image_and_boxes(x_store=x_store, main_index=index)
+        else:
+            train_preprocess = config.train_preprocess()
+            image, bboxes = load_instance(x_store, index=index, preprocessing=train_preprocess)
+        augmentations = config.train_transforms(image=image, bboxes=bboxes)
         image = augmentations["image"]
         bboxes = augmentations["bboxes"]
         targets = [torch.zeros((num_anchors // 3, S, S, 6)) for S in S_anchor]
@@ -710,6 +714,80 @@ def seed_everything(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def load_mosaic_image_and_boxes(x_store, main_index, s=416, 
+                                    scale_range=[0.3, 0.7], maxfrac=0.75):
+        scale_x = scale_range[0] + random.random() * (scale_range[1] - scale_range[0])
+        scale_y = scale_range[0] + random.random() * (scale_range[1] - scale_range[0])
+        xc = int(scale_x * s)
+        yc = int(scale_y * s)
+        indices = [main_index] + random.sample(range(len(x_store)), 3) 
+        mosaic_image = np.zeros((s, s, 3), dtype=np.float32)
+        final_boxes  = []
+
+        # random.shuffle(indices)
+        for i, id in enumerate(indices):
+            if i == 0:    # top left
+                x1a, y1a, x2a, y2a =  0,  0, xc, yc
+
+                height = yc 
+                width = xc
+                # x1b, y1b, x2b, y2b = s - xc, s - yc, s, s # from bottom right
+            elif i == 1:  # top right
+                x1a, y1a, x2a, y2a = xc, 0, s , yc
+                height = yc
+                width= s - xc
+                # x1b, y1b, x2b, y2b = 0, s - yc, s - xc, s # from bottom left
+            elif i == 2:  # bottom left
+                x1a, y1a, x2a, y2a = 0, yc, xc, s
+                height = s - yc
+                width= xc
+                # x1b, y1b, x2b, y2b = s - xc, 0, s, s-yc   # from top right
+            elif i == 3:  # bottom right
+                x1a, y1a, x2a, y2a = xc, yc,  s, s
+                height = s - yc
+                width= s - xc
+            preprocessing = config.train_preprocess(height=height, width=width)
+
+            
+            image, boxes = load_instance(x_store, id, preprocessing)
+            mosaic_image[y1a:y2a, x1a:x2a] = image
+            if len(boxes) == 0:
+                continue
+            boxes = np.asarray(boxes)
+            boxes[:, [0,2]] *= width
+            boxes[:, [1,3]] *= height
+
+            boxes[:, 0] += x1a
+            boxes[:, 1] += y1a
+
+            boxes[:, [0,2]] /= s
+            boxes[:, [1,3]] /= s
+
+            
+            final_boxes.append(boxes)
+
+        # collect boxes
+        final_boxes  = np.vstack(final_boxes)
+
+
+        return mosaic_image, final_boxes
+
+def load_instance(x_store, index, preprocessing):
+        label_path = x_store[index].label_path.split('/')[-1]
+
+        label_path = os.path.join(config.DATASET + '/labels', label_path)
+        bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+
+        img_path = x_store[index].img_path.split('/')[-1]
+        img_path = os.path.join(config.DATASET + '/images', img_path)
+        image = np.array(Image.open(img_path).convert("RGB"))
+
+        
+        augmentations = preprocessing(image=image, bboxes=bboxes)
+        image = augmentations["image"]
+        boxes = augmentations["bboxes"]
+        
+        return image, boxes
 
 
 # def preprocess_image(images):

@@ -110,7 +110,7 @@ class YOLODataset(Dataset):
                 width= s - xc
             preprocessing = config.train_preprocess(height=height, width=width)
             #load instaces or images
-            if config.BASE:
+            if config.BASE and not config.ADDING_IMAGE_STORE_IN_MOSAIC:
                 p = 1
             else:
                 p = random.random()
@@ -589,7 +589,7 @@ def test():
     
     transform = config.test_transforms
     IMAGE_SIZE = 32
-    file_path = os.path.join('./weighs_final', f'image_store_base_15_5.pth')
+    file_path = os.path.join('./weights', f'image_store_task2_15_5.pth')
 
     print("Finetuning")
     if os.path.exists(file_path):
@@ -599,8 +599,8 @@ def test():
         x_store = image_store.retrieve()
     
     dataset = YOLODataset(
-        '15_5_train_base.csv',
-        instance= None,
+        'csv_path/15_5_train_base.csv',
+        instance= x_store,
         transform=config.train_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
@@ -609,6 +609,13 @@ def test():
         filter_dataset = [i for i in range(15)],
         train = True
     )
+    # dataset = ImageStore(
+    #     instances=x_store,
+    #     anchors=config.ANCHORS,
+    #     transform=config.train_transforms,
+    #     S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
+    #     filter_dataset = [i for i in range(20)]
+    # )
     S = [13, 26, 52]
     scaled_anchors = torch.tensor(anchors) / (
         1 / torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
@@ -623,8 +630,8 @@ def test():
         for i in range(y[0].shape[1]):
             anchor = scaled_anchors[i]
             # print(anchor.shape)
-            # print(x.shape)
-            # print(y[i].shape)
+            # print(x[i].shape)
+            print(y[i].shape)
             # print(y[i][y[i][...,0] == 1.].shape)
             # print(y[i])
             # print(y[i][..., 0])
@@ -636,7 +643,6 @@ def test():
         # break
         plot_image(x[0].permute(1, 2, 0).to("cpu"), boxes)
         break
-
 
 
 

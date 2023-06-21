@@ -68,6 +68,7 @@ def train_fn(epoch, train_loader, model, optimizer, loss_fn, scaler, scaled_anch
             model.train_warp = True
             optimizer.zero_grad()
             x_store = image_store.retrieve()
+            random.shuffle(x_store)
             # print(len(x_store))
             if config.BASE:
                 filter_cls = [i for i in range(config.BASE_CLASS)]

@@ -34,15 +34,16 @@ class YoloLoss(nn.Module):
         obj = target[..., 0] == 1  # in paper this is Iobj_i
         noobj_target = target[..., 0] == 0
         predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])
+ 
         # print(noobj_target)
         if prev_preds is not None:
             #confidence_score
             prev_preds[..., 0] = self.sigmoid(prev_preds[..., 0])
-            obj_conf = prev_preds[..., 0] >= 0.3
-
+            obj_conf = (prev_preds[..., 0] >= 0.3).type(torch.int8)
+            obj_conf = (obj_conf - obj.type(torch.int8)) == 1
             #noobj confidence score
             prev_preds[..., 1:3] = self.sigmoid(prev_preds[..., 1:3])
-            noobj_pred = (prev_preds[..., 0] < 0.3).type(torch.int8)
+            noobj_pred = (prev_preds[..., 0] <= 0.1).type(torch.int8)
             noobj = (noobj_pred + noobj_target.type(torch.int8)) == 2
             
             box_loss_distill = F.mse_loss(predictions[..., 1:5][obj_conf], prev_preds[..., 1:5][obj_conf])
@@ -76,7 +77,7 @@ class YoloLoss(nn.Module):
 
         anchors = anchors.reshape(1, 3, 1, 1, 2)
         box_preds = torch.cat([predictions[..., 1:3], torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
-        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj]).detach()
+        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj]).detach()      
         object_loss = self.bce((predictions[..., 0:1][obj]), (ious * target[..., 0:1][obj]))
 
         # ======================== #
@@ -118,6 +119,8 @@ class YoloLoss(nn.Module):
             + self.lambda_noobj * no_object_loss
             + self.lambda_class * class_loss
             )
+
+
 
 def loss_logits_dummy(predictions, prev_preds, anchors):
     sigmoid = nn.Sigmoid()
