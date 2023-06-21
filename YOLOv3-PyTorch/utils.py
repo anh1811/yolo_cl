@@ -582,7 +582,7 @@ def get_image_store_load(x_store, test_csv_path):
 
 import numpy as np 
 
-def preprocessing_image(batch, x_store, filter_dataset):
+def preprocessing_image(batch, x_store):
     import config
     from PIL import Image, ImageFile
     anchors = config.ANCHORS
@@ -602,8 +602,6 @@ def preprocessing_image(batch, x_store, filter_dataset):
         # label_path = img.label_path
         # image = np.array(Image.open(img_path).convert("RGB"))
         # bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
-        if filter_dataset:
-            bboxes = [box for box in bboxes if int(box[-1]) in filter_dataset]
         if random.random < 0.5:
             image, bboxes = load_mosaic_image_and_boxes(x_store=x_store, main_index=index)
         else:
