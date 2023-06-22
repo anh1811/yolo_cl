@@ -602,7 +602,7 @@ def preprocessing_image(batch, x_store):
         # label_path = img.label_path
         # image = np.array(Image.open(img_path).convert("RGB"))
         # bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
-        if random.random < 0.5:
+        if random.random() < 0.5:
             image, bboxes = load_mosaic_image_and_boxes(x_store=x_store, main_index=index)
         else:
             train_preprocess = config.train_preprocess()

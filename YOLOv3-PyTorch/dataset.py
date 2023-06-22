@@ -74,14 +74,15 @@ class YOLODataset(Dataset):
         # list_wout_mindex = self.instances.copy()
         # list_wout_mindex.remove(main_index)
         # indices = [main_index]
-        if self.instances is not None:
+        # if self.instances is not None:
 
-            indices = random.sample(range(len(self.instances)), 4)
-            index_of_main_image = random.randint(0,3)
-        else:
+        #     indices = random.sample(range(len(self.instances)), 4)
+        #     index_of_main_image = random.randint(0,3)
+        # else:
             # print(len(self.annotations))
-            indices = random.sample(range(len(self.annotations)), 4)
-            index_of_main_image = random.randint(0,3)
+        indices = [main_index] + random.sample(range(len(self.annotations)), 3)
+        random.shuffle(indices)
+        index_of_main_image = indices.index(main_index)
 
         mosaic_image = np.zeros((s, s, 3), dtype=np.float32)
         final_boxes  = []
@@ -110,7 +111,7 @@ class YOLODataset(Dataset):
                 width= s - xc
             preprocessing = config.train_preprocess(height=height, width=width)
             #load instaces or images
-            if config.BASE and not config.ADDING_IMAGE_STORE_IN_MOSAIC:
+            if config.BASE or not config.ADDING_IMAGE_STORE_IN_MOSAIC:
                 p = 1
             else:
                 p = random.random()
