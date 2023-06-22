@@ -786,8 +786,3 @@ def load_instance(x_store, index, preprocessing):
         boxes = augmentations["bboxes"]
         
         return image, boxes
-
-
-# def preprocess_image(images):
-#     for img in images:
-#         label_path = 

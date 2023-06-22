@@ -39,7 +39,7 @@ class YoloLoss(nn.Module):
         if prev_preds is not None:
             #confidence_score
             prev_preds[..., 0] = self.sigmoid(prev_preds[..., 0])
-            obj_conf = (prev_preds[..., 0] >= 0.5).type(torch.int8)
+            obj_conf = (prev_preds[..., 0] >= 0.5)
             # obj_conf = (obj_conf - obj.type(torch.int8)) == 1
             #noobj confidence score
             prev_preds[..., 1:3] = self.sigmoid(prev_preds[..., 1:3])
