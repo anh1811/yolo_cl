@@ -15,10 +15,11 @@ class YoloLoss(nn.Module):
         super().__init__()
         self.mse = nn.MSELoss()
         self.bce = nn.BCEWithLogitsLoss()
+
         if config.BASE or config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
             self.entropy = nn.CrossEntropyLoss()
         else:
-            self.entropy = nn.CrossEntropyLoss(label_smoothing=0.2)
+            self.entropy = nn.CrossEntropyLoss()
         self.sigmoid = nn.Sigmoid()
 
         # Constants signifying how much to pay for each respective part of the loss
@@ -34,7 +35,9 @@ class YoloLoss(nn.Module):
         obj = target[..., 0] == 1  # in paper this is Iobj_i
         noobj_target = target[..., 0] == 0
         predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])
- 
+        anchors = anchors.reshape(1, 3, 1, 1, 2)
+        box_preds = torch.cat([predictions[..., 1:3], torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
+
         # print(noobj_target)
         if prev_preds is not None:
             #confidence_score
@@ -46,10 +49,15 @@ class YoloLoss(nn.Module):
             noobj_pred = (prev_preds[..., 0] <= 0.1).type(torch.int8)
             noobj = (noobj_pred + noobj_target.type(torch.int8)) == 2
             
-            box_loss_distill = F.mse_loss(predictions[..., 1:5][obj_conf], prev_preds[..., 1:5][obj_conf])
+            prev_box_preds = torch.cat([prev_preds[..., 1:3], torch.exp(prev_preds[..., 3:5]) * anchors], dim=-1)
+
+            # box_loss_distill = F.mse_loss(predictions[..., 1:5][obj_conf], prev_preds[..., 1:5][obj_conf])
+
             #obj c
-            object_loss_distill = self.bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
             
+            ious = intersection_over_union(box_preds[obj_conf], prev_box_preds[obj_conf], CIoU=True).detach()
+            object_loss_distill = self.bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
+            box_loss_distill = (1.0 - ious).mean()    
             #class_prob
 
             class_loss_distill = logit_distillation(predictions[..., 5:5+config.BASE_CLASS][obj_conf],
@@ -78,9 +86,8 @@ class YoloLoss(nn.Module):
         #   FOR OBJECT LOSS    #
         # ==================== #
 
-        anchors = anchors.reshape(1, 3, 1, 1, 2)
-        box_preds = torch.cat([predictions[..., 1:3], torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
-        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj]).detach()      
+        
+        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj], CIoU=True).detach()      
         object_loss = self.bce((predictions[..., 0:1][obj]), (ious * target[..., 0:1][obj]))
 
         # ======================== #
@@ -88,11 +95,11 @@ class YoloLoss(nn.Module):
         # ======================== #
         # print(target[..., 5][obj])
           # x,y coordinates
-        target[..., 3:5] = torch.log(
-            (1e-16 + target[..., 3:5] / anchors)
-        )  # width, height coordinates
-        box_loss = self.mse(predictions[..., 1:5][obj], target[..., 1:5][obj])
-
+        # target[..., 3:5] = torch.log(
+        #     (1e-16 + target[..., 3:5] / anchors)
+        # )  # width, height coordinates
+        # box_loss = self.mse(predictions[..., 1:5][obj], target[..., 1:5][obj])
+        box_loss = (1.0 - ious).mean()
         # ================== #
         #   FOR CLASS LOSS   #
         # ================== #

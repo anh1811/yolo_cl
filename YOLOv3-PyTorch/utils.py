@@ -10,7 +10,7 @@ from collections import Counter
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import PIL.Image as Image
-
+import math
 
 class Instances():
     def __init__(
@@ -38,7 +38,7 @@ def iou_width_height(boxes1, boxes2):
     return intersection / union
 
 
-def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
+def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint", GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     """
     Video explanation of this function:
     https://youtu.be/XXYG5ZWtjj0
@@ -64,7 +64,10 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
         box2_y1 = boxes_labels[..., 1:2] - boxes_labels[..., 3:4] / 2
         box2_x2 = boxes_labels[..., 0:1] + boxes_labels[..., 2:3] / 2
         box2_y2 = boxes_labels[..., 1:2] + boxes_labels[..., 3:4] / 2
-
+        w1 = boxes_preds[..., 2:3]
+        h1 = boxes_preds[..., 3:4]
+        w2 = boxes_labels[..., 2:3]
+        h2 = boxes_labels[..., 3:4]
     if box_format == "corners":
         box1_x1 = boxes_preds[..., 0:1]
         box1_y1 = boxes_preds[..., 1:2]
@@ -83,7 +86,21 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
     intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
     box1_area = abs((box1_x2 - box1_x1) * (box1_y2 - box1_y1))
     box2_area = abs((box2_x2 - box2_x1) * (box2_y2 - box2_y1))
-
+    iou = intersection / (box1_area + box2_area - intersection)
+    if CIoU or DIoU or GIoU:
+        cw = box1_x2.maximum(box2_x2) - box1_x1.minimum(box2_x1)  # convex (smallest enclosing box) width
+        ch = box1_y2.maximum(box2_y2) - box1_y1.minimum(box2_y1)  # convex height
+        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+            c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+            rho2 = ((box2_x1 + box2_x2 - box1_x1 - box1_x2) ** 2 + (box2_y1 + box2_y2 - box1_y1 - box1_y2) ** 2) / 4  # center dist ** 2
+            if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                v = (4 / math.pi ** 2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)).pow(2)
+                with torch.no_grad():
+                    alpha = v / (v - iou + (1 + eps))
+                return iou - (rho2 / c2 + v * alpha)  # CIoU
+            return iou - rho2 / c2  # DIoU
+        c_area = cw * ch + eps  # convex area
+        return iou - (c_area - intersection) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
     return intersection / (box1_area + box2_area - intersection + 1e-6)
 
 
