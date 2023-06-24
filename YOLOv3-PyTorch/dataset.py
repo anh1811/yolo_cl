@@ -122,11 +122,9 @@ class YOLODataset(Dataset):
                 boxes = augments["bboxes"]
             elif p < 0.5:
                 boxes = []
+                id = random.choice(range(len(self.instances)))
                 image, boxes = self.load_instance(id, preprocessing=preprocessing)
             else:
-                # print("using mosaic")
-                if self.instances is not None:
-                    id = random.choice(range(len(self.annotations)))
                 image, boxes, _, _ = self.load_bboxes_image(id)
                 augments = preprocessing(image = image, bboxes = boxes)
                 image = augments["image"]
@@ -600,15 +598,15 @@ def test():
         x_store = image_store.retrieve()
     
     dataset = YOLODataset(
-        'csv_path/15_5_train_base.csv',
-        instance= x_store,
-        transform=config.train_transforms,
+        'csv_path/15_5_train_new.csv',
+        instance= None,
+        transform=config.test_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = [i for i in range(15)],
-        train = True
+        filter_dataset = [i for i in range(20)],
+        train = False
     )
     # dataset = ImageStore(
     #     instances=x_store,
@@ -643,7 +641,6 @@ def test():
         # print(boxes)
         # break
         plot_image(x[0].permute(1, 2, 0).to("cpu"), boxes)
-        break
 
 
 

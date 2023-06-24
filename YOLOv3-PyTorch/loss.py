@@ -51,15 +51,18 @@ class YoloLoss(nn.Module):
             object_loss_distill = self.bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
             
             #class_prob
-            class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
-            std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
-            thres = mean_prob  + alpha * std_prob
-            # print(thres.shape)
-            # print(class_prob.shape)
 
-            obj_cls = class_prob > thres
-            class_loss_distill = self.mse(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
-            prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
+            class_loss_distill = logit_distillation(predictions[..., 5:5+config.BASE_CLASS][obj_conf],
+                                                    prev_preds[..., 5:5+config.BASE_CLASS][obj_conf] )
+            # class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
+            # std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
+            # thres = mean_prob  + alpha * std_prob
+            # # print(thres.shape)
+            # # print(class_prob.shape)
+
+            # obj_cls = class_prob > thres
+            # class_loss_distill = self.mse(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
+            # prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
 
         else:
             noobj = noobj_target
