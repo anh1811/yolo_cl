@@ -302,7 +302,7 @@ def plot_image(image, boxes):
             bbox={"color": colors[int(class_pred)], "pad": 0},
         )
 
-    plt.savefig("test.png")
+    plt.savefig("test_9.png")
 
 
 def get_evaluation_bboxes(
@@ -698,7 +698,7 @@ def infer(model, img_path, thresh, iou_thresh, anchors):
     # image = image[np.newaxis, :]
     augmentations = config.infer_transforms(image=image)
     x = augmentations["image"]
-    x = x.to("cuda")
+    # x = x.to("cuda")
     x = torch.reshape(x, [1,3,416,416])
     print(x.shape)
     with torch.no_grad():

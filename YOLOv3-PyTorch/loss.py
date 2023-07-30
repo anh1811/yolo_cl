@@ -1,3 +1,4 @@
+# %%writefile loss.py
 """
 Implementation of Yolo Loss Function similar to the one in Yolov3 paper,
 the difference from what I can tell is I use CrossEntropy for the classes
@@ -15,63 +16,70 @@ class YoloLoss(nn.Module):
         super().__init__()
         self.mse = nn.MSELoss()
         self.bce = nn.BCEWithLogitsLoss()
-
         if config.BASE or config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
             self.entropy = nn.CrossEntropyLoss()
         else:
-            self.entropy = nn.CrossEntropyLoss()
+            self.entropy = nn.CrossEntropyLoss(label_smoothing = 0.2)
         self.sigmoid = nn.Sigmoid()
-
+        self.softmax = nn.Softmax(dim = -1)
         # Constants signifying how much to pay for each respective part of the loss
         self.lambda_class = 1
         self.lambda_noobj = 10
         self.lambda_obj = 1
         self.lambda_box = 10
 
-    def forward(self, predictions, target, anchors, prev_preds = None, gamma = 0.2):
+    def forward(self, predictions, target, anchors, prev_preds = None, gamma = 0.2, thresh1 = 0.1, thresh2 = 0.6, self_distill = False):
         # Check where obj and noobj (we ignore if target == -1)
         # prev_preds = None
         alpha = 2
+        # thresh1 = 0.1
+        # thresh2 = 0.6
         obj = target[..., 0] == 1  # in paper this is Iobj_i
         noobj_target = target[..., 0] == 0
         predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])
-        anchors = anchors.reshape(1, 3, 1, 1, 2)
-        box_preds = torch.cat([predictions[..., 1:3], torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
-
         # print(noobj_target)
         if prev_preds is not None:
             #confidence_score
             prev_preds[..., 0] = self.sigmoid(prev_preds[..., 0])
-            obj_conf = (prev_preds[..., 0] >= 0.5)
-            # obj_conf = (obj_conf - obj.type(torch.int8)) == 1
+            cls_prev_score = self.softmax(prev_preds[..., 5:5+config.BASE_CLASS])
+            prev_score = prev_preds[...,0] * torch.max(cls_prev_score, dim = -1)[0]
+            obj_conf = prev_score >= thresh2
+            box_conf = (obj_conf) | (prev_preds[...,0] >= 0.99)
+            obj_not_sure = prev_score > thresh1
+
+
+            
+            # obj_conf = prev_preds[..., 0] >= 0.3
+
             #noobj confidence score
             prev_preds[..., 1:3] = self.sigmoid(prev_preds[..., 1:3])
-            noobj_pred = (prev_preds[..., 0] <= 0.1).type(torch.int8)
-            noobj = (noobj_pred + noobj_target.type(torch.int8)) == 2
-            
-            prev_box_preds = torch.cat([prev_preds[..., 1:3], torch.exp(prev_preds[..., 3:5]) * anchors], dim=-1)
-
-            # box_loss_distill = F.mse_loss(predictions[..., 1:5][obj_conf], prev_preds[..., 1:5][obj_conf])
-
+            noobj_pred = (obj_conf < thresh1)
+            noobj = (noobj_pred) & (noobj_target)         
+            box_loss_distill = F.mse_loss(predictions[..., 1:5][box_conf], prev_preds[..., 1:5][box_conf])
             #obj c
+            object_loss_distill = self.bce((predictions[..., 0:1][obj_not_sure]), (prev_preds[..., 0:1][obj_not_sure]))
             
-            ious = intersection_over_union(box_preds[obj_conf], prev_box_preds[obj_conf], CIoU=True).detach()
-            object_loss_distill = self.bce((predictions[..., 0:1][obj_conf]), (prev_preds[..., 0:1][obj_conf]))
-            box_loss_distill = (1.0 - ious).mean()    
             #class_prob
+            class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
+            std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
+            thres = mean_prob  + alpha * std_prob
+            # print(thres.shape)
+            # print(class_prob.shape)
 
-            class_loss_distill = logit_distillation(predictions[..., 5:5+config.BASE_CLASS][obj_conf],
-                                                    prev_preds[..., 5:5+config.BASE_CLASS][obj_conf] )
-            # class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
-            # std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
-            # thres = mean_prob  + alpha * std_prob
-            # # print(thres.shape)
-            # # print(class_prob.shape)
+            obj_cls = class_prob > thres
+            class_loss_distill = self.mse(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
+            prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
+            
 
-            # obj_cls = class_prob > thres
-            # class_loss_distill = self.mse(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
-            # prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
-
+            # if self_distill:
+            #     self_pred = predictions.clone().detach()
+            #     cls_score, cls_index = torch.max(self.softmax(self_pred), dim = -1)
+            #     cls_new = torch.isin(cls_index, torch.range(config.BASE_CLASS, config.NUM_CLASSES))
+            #     score = (self.sigmoid(self_pred[..., 0]) * cls_score)
+            #     score_new_sure = (score >= 0.5) & (cls_new)
+            #     noobj = noobj & (~score_new_sure)
+            #     self_box_loss_distill = F.mse_loss(predictions[..., 1:5][score_new_sure], self_pred[..., 1:5][score_new_sure])
+            #     self_class_loss_distill = logit_distillation(predictions[score_new_sure], self_pred[score_new_sure])
         else:
             noobj = noobj_target
         # ======================= #
@@ -86,8 +94,9 @@ class YoloLoss(nn.Module):
         #   FOR OBJECT LOSS    #
         # ==================== #
 
-        
-        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj], CIoU=True).detach()      
+        anchors = anchors.reshape(1, 3, 1, 1, 2)
+        box_preds = torch.cat([predictions[..., 1:3], torch.exp(predictions[..., 3:5]) * anchors], dim=-1)
+        ious = intersection_over_union(box_preds[obj], target[..., 1:5][obj]).detach()
         object_loss = self.bce((predictions[..., 0:1][obj]), (ious * target[..., 0:1][obj]))
 
         # ======================== #
@@ -95,11 +104,11 @@ class YoloLoss(nn.Module):
         # ======================== #
         # print(target[..., 5][obj])
           # x,y coordinates
-        # target[..., 3:5] = torch.log(
-        #     (1e-16 + target[..., 3:5] / anchors)
-        # )  # width, height coordinates
-        # box_loss = self.mse(predictions[..., 1:5][obj], target[..., 1:5][obj])
-        box_loss = (1.0 - ious).mean()
+        target[..., 3:5] = torch.log(
+            (1e-16 + target[..., 3:5] / anchors)
+        )  # width, height coordinates
+        box_loss = self.mse(predictions[..., 1:5][obj], target[..., 1:5][obj])
+
         # ================== #
         #   FOR CLASS LOSS   #
         # ================== #
@@ -129,8 +138,6 @@ class YoloLoss(nn.Module):
             + self.lambda_noobj * no_object_loss
             + self.lambda_class * class_loss
             )
-
-
 
 def loss_logits_dummy(predictions, prev_preds, anchors):
     sigmoid = nn.Sigmoid()
