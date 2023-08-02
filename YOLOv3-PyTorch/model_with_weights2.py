@@ -257,12 +257,12 @@ if __name__ == "__main__":
 
     model = YOLOv3(num_classes=cfg.BASE_CLASS)
     # print(model.type)
-    model.load_darknet_weights(weights_path="/storage/anhnn99/cl/YOLOv3-PyTorch-main/weights/yolov3.weights")
+    model.load_darknet_weights(weights_path="/kaggle/input/yolov3-weights/yolov3.weights")
     # model.layers[15].pred[1] = CNNBlock(1024, 20 * 3, bn_act=False, kernel_size=1)
     # model.layers[22].pred[1] = CNNBlock(512, 20 * 3, bn_act=False, kernel_size=1)
     # model.layers[29].pred[1] = CNNBlock(256, 20 * 3, bn_act=False, kernel_size=1)
     from adan import Adan
-    optimizer = Adan(model.parameters(), lr=3e-5)
+    optimizer = optim.AdamW(model.parameters(), lr=3e-5)
     from utils import save_checkpoint, load_checkpoint
 
     # checkpoint = {"state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}

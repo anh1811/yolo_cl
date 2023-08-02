@@ -5,56 +5,59 @@ import torch
 from albumentations.pytorch import ToTensorV2
 # from utils import seed_everything
 
-DATASET = 'PASCAL_VOC'
+DATASET = '/kaggle/input/pascalvoc-yolo'
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # seed_everything()  # If you want deterministic behavior
 NUM_WORKERS = 8
 BATCH_SIZE = 32
 IMAGE_SIZE = 416
-NUM_CLASSES = 19
-LEARNING_RATE = 1e-5
+NUM_CLASSES = 20
+LEARNING_RATE = 3e-5
 WEIGHT_DECAY = 3e-5
-NUM_EPOCHS = 100
+NUM_EPOCHS = 150
 CONF_THRESHOLD = 0.5
 MAP_IOU_THRESH = 0.5
 NMS_IOU_THRESH = 0.45
 S = [IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8]
 PIN_MEMORY = True
-LOAD_MODEL = True
+LOAD_MODEL = False
 SAVE_MODEL = True
-CHECKPOINT_FILE = "mlruns/701151339226981904/a3254765d0ba4406a725bff2f46c87ef/artifacts/task2_15_5_AP15.pth.tar"
+
 IMG_DIR = DATASET + "/images/"
 LABEL_DIR = DATASET + "/labels/"
-DISTILL = False
+DISTILL = True
 DISTILL_FEATURES = True
 DISTILL_LOGITS = True
-BASE_CLASS = 18
+BASE_CLASS = 19
 NEW_CLASS = 1
 BASE = False
 
-
+# CHECKPOINT_FILE = f'my_checkpoint_{BASE_CLASS}.pth.tar'
+CHECKPOINT_FILE = "/kaggle/input/yolov3-weight/2007_task2_19_1_mAP_19_1.pth.tar"
 
 #FINETUNE
 FINETUNE = True
 BATCH_SIZE_FINETUNE = 4
-FINETUNE_NUM_IMAGE_PER_STORE = 10
+FINETUNE_NUM_IMAGE_PER_STORE = -1
 
 #WARP 
-WARP =False
+WARP = True
 TRAIN_WARP = False 
-TRAIN_WARP_AT_ITR_NO = 20
+TRAIN_WARP_AT_ITR_NO = 3
 # WARP_LAYERS = ('layers.15.pred.1.conv.weight', 'layers.22.pred.1.conv.weight', 'layers.29.pred.1.conv.weight')
 WARP_LAYERS = ('layers.22.pred.1.conv.weight')
+# WARP_LAYERS = ()
 # WARP_LAYERS = ('layers.15.pred.1.conv.weight', 'layers.29.pred.1.conv.weight')
 NUM_FEATURES_PER_CLASS = 3
 NUM_IMAGES_PER_CLASS = 10
 BATCH_SIZE_WARP = 8
 USE_FEATURE_STORE = False
-IMAGE_STORE_LOC = 'weights/'
+IMAGE_STORE_LOC = '/kaggle/input/yolov3-weight/'
 MOSAIC = True
-ADDING_IMAGE_STORE_IN_MOSAIC = True
+ADD_IMAGE_STORE = True
 
-BASE_CHECK_POINT = "mlruns/772859498270752787/69cfd0f94eb34a379c01c8d72fbf89d4/artifacts/Base_15_5_mAP.pth.tar"
+
+BASE_CHECK_POINT = "/kaggle/input/yolov3-weight/2007_base_19_1_mAP_19_1.pth.tar"
 ANCHORS = [
     [(0.28, 0.22), (0.38, 0.48), (0.9, 0.78)],
     [(0.07, 0.15), (0.15, 0.11), (0.14, 0.29)],
@@ -63,7 +66,6 @@ ANCHORS = [
 
 
 scale = 1.1
-
 def train_preprocess(height = IMAGE_SIZE, width = IMAGE_SIZE):
     max_size = max(height, width)
     return A.Compose(
@@ -105,6 +107,24 @@ train_transforms = A.Compose(
     ],
     bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
 )
+
+def weak_preprocessing(height = IMAGE_SIZE, width = IMAGE_SIZE):
+    max_size = max(height, width)
+    return A.Compose(
+            [
+            A.LongestMaxSize(max_size=int(max_size * scale)),
+            A.PadIfNeeded(
+                min_height=int(height * scale),
+                min_width=int(width * scale),
+                border_mode=cv2.BORDER_CONSTANT,
+            ),
+            A.RandomCrop(width=width, height=height),
+            A.HorizontalFlip(p=0.5),
+            A.Blur(p=0.1),
+            ],
+        bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
+    )
+
 
 test_transforms = A.Compose(
     [

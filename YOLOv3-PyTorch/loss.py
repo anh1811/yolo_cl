@@ -1,4 +1,3 @@
-# %%writefile loss.py
 """
 Implementation of Yolo Loss Function similar to the one in Yolov3 paper,
 the difference from what I can tell is I use CrossEntropy for the classes
@@ -19,7 +18,9 @@ class YoloLoss(nn.Module):
         if config.BASE or config.FINETUNE_NUM_IMAGE_PER_STORE > 0:
             self.entropy = nn.CrossEntropyLoss()
         else:
-            self.entropy = nn.CrossEntropyLoss(label_smoothing = 0.2)
+#             weights = torch.tensor([0.2] * config.BASE_CLASS + [0.8] * config.NEW_CLASS).to(config.DEVICE)
+            self.entropy = nn.CrossEntropyLoss(label_smoothing = 0.35)
+            self.prev_entropy = nn.CrossEntropyLoss()
         self.sigmoid = nn.Sigmoid()
         self.softmax = nn.Softmax(dim = -1)
         # Constants signifying how much to pay for each respective part of the loss
@@ -28,12 +29,12 @@ class YoloLoss(nn.Module):
         self.lambda_obj = 1
         self.lambda_box = 10
 
-    def forward(self, predictions, target, anchors, prev_preds = None, gamma = 0.2, thresh1 = 0.1, thresh2 = 0.6, self_distill = False):
+    def forward(self, predictions, target, anchors, prev_preds = None, gamma = 0.2):
         # Check where obj and noobj (we ignore if target == -1)
         # prev_preds = None
         alpha = 2
-        # thresh1 = 0.1
-        # thresh2 = 0.6
+        thresh1 = 0.1
+        thresh2 = 0.5
         obj = target[..., 0] == 1  # in paper this is Iobj_i
         noobj_target = target[..., 0] == 0
         predictions[..., 1:3] = self.sigmoid(predictions[..., 1:3])
@@ -42,25 +43,27 @@ class YoloLoss(nn.Module):
             #confidence_score
             prev_preds[..., 0] = self.sigmoid(prev_preds[..., 0])
             cls_prev_score = self.softmax(prev_preds[..., 5:5+config.BASE_CLASS])
-            prev_score = prev_preds[...,0] * torch.max(cls_prev_score, dim = -1)[0]
-            obj_conf = prev_score >= thresh2
+            cls_ind, cls_score = torch.max(cls_prev_score, dim = -1)
+            score = prev_preds[...,0] * cls_score
+            obj_conf = score >= thresh2
             box_conf = (obj_conf) | (prev_preds[...,0] >= 0.99)
-            obj_not_sure = prev_score > thresh1
-
-
-            
+            obj_not_sure = score >= thresh1
+            obj_in_zone_not_sure = (obj_not_sure) & (~obj_conf)
             # obj_conf = prev_preds[..., 0] >= 0.3
 
             #noobj confidence score
             prev_preds[..., 1:3] = self.sigmoid(prev_preds[..., 1:3])
-            noobj_pred = (obj_conf < thresh1)
-            noobj = (noobj_pred) & (noobj_target)         
+            noobj_pred = (obj_conf < thresh1).type(torch.int8)
+            noobj = (noobj_pred + noobj_target.type(torch.int8)) == 2
+            
             box_loss_distill = F.mse_loss(predictions[..., 1:5][box_conf], prev_preds[..., 1:5][box_conf])
             #obj c
             object_loss_distill = self.bce((predictions[..., 0:1][obj_not_sure]), (prev_preds[..., 0:1][obj_not_sure]))
             
+#             class_loss_distill = self.prev_entropy(predictions[..., 5:5+config.BASE_CLASS][obj_conf], cls_ind[obj_conf].type(torch.int64))
+            
             #class_prob
-            class_prob = F.softmax(prev_preds[..., 5:5+config.BASE_CLASS][obj_conf], dim = -1)
+            class_prob = cls_prev_score[obj_conf]
             std_prob, mean_prob = torch.std_mean(class_prob, dim = -1, keepdim = True)
             thres = mean_prob  + alpha * std_prob
             # print(thres.shape)
@@ -68,20 +71,11 @@ class YoloLoss(nn.Module):
 
             obj_cls = class_prob > thres
             class_loss_distill = self.mse(predictions[..., 5:5+config.BASE_CLASS][obj_conf][obj_cls],\
-            prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls])
-            
+            prev_preds[..., 5:5 +config.BASE_CLASS][obj_conf][obj_cls]) * 2.0
 
-            # if self_distill:
-            #     self_pred = predictions.clone().detach()
-            #     cls_score, cls_index = torch.max(self.softmax(self_pred), dim = -1)
-            #     cls_new = torch.isin(cls_index, torch.range(config.BASE_CLASS, config.NUM_CLASSES))
-            #     score = (self.sigmoid(self_pred[..., 0]) * cls_score)
-            #     score_new_sure = (score >= 0.5) & (cls_new)
-            #     noobj = noobj & (~score_new_sure)
-            #     self_box_loss_distill = F.mse_loss(predictions[..., 1:5][score_new_sure], self_pred[..., 1:5][score_new_sure])
-            #     self_class_loss_distill = logit_distillation(predictions[score_new_sure], self_pred[score_new_sure])
         else:
             noobj = noobj_target
+        noobj = noobj_target
         # ======================= #
         #   FOR NO OBJECT LOSS    #
         # ======================= #
@@ -112,11 +106,23 @@ class YoloLoss(nn.Module):
         # ================== #
         #   FOR CLASS LOSS   #
         # ================== #
-
-        class_loss = self.entropy(
-            (predictions[..., 5:][obj]), (target[..., 5][obj].long()),
-        )
-
+#         print(torch.unique(target[...,5][obj]))
+        if prev_preds is None:
+            class_loss = self.entropy(
+            (predictions[..., 5:][obj]), (target[..., 5][obj].long()),)
+        else:
+            new_class_target = sum(target[..., 5][obj].long()==i for i in range(config.BASE_CLASS, 20)).bool()
+#             print(new_class_target)
+#             print(target[..., 5][obj].long())
+            class_loss = self.entropy(
+            (predictions[..., 5:][obj][new_class_target]), (target[..., 5][obj][new_class_target].long()),)
+#             print(target[..., 5][obj][new_class_target].long())
+#             print(target[..., 5][obj][~new_class_target].long()[1])
+#             if len(target[..., 5][obj][~new_class_target]):
+#                 print(torch.unique(target[...,5][obj][~new_class_target]))
+#                 print(target[..., 5][obj][~new_class_target].long()[0])
+            class_loss += self.prev_entropy((predictions[..., 5:][obj][~new_class_target]), (target[..., 5][obj][~new_class_target].long()),)
+#             print(class_loss)
         # print("__________________________________")
         # print(self.lambda_box * box_loss)
         # print(self.lambda_obj * object_loss)

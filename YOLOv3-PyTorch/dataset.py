@@ -74,15 +74,14 @@ class YOLODataset(Dataset):
         # list_wout_mindex = self.instances.copy()
         # list_wout_mindex.remove(main_index)
         # indices = [main_index]
-        # if self.instances is not None:
+        if self.instances is not None:
 
-        #     indices = random.sample(range(len(self.instances)), 4)
-        #     index_of_main_image = random.randint(0,3)
-        # else:
+            indices = random.sample(range(len(self.instances)), 4)
+            index_of_main_image = random.randint(0,3)
+        else:
             # print(len(self.annotations))
-        indices = [main_index] + random.sample(range(len(self.annotations)), 3)
-        random.shuffle(indices)
-        index_of_main_image = indices.index(main_index)
+            indices = random.sample(range(len(self.annotations)), 4)
+            index_of_main_image = random.randint(0,3)
 
         mosaic_image = np.zeros((s, s, 3), dtype=np.float32)
         final_boxes  = []
@@ -110,8 +109,9 @@ class YOLODataset(Dataset):
                 height = s - yc
                 width= s - xc
             preprocessing = config.train_preprocess(height=height, width=width)
+            weak_preprocessing  = config.weak_preprocessing(height= height, width=width)
             #load instaces or images
-            if config.BASE or not config.ADDING_IMAGE_STORE_IN_MOSAIC:
+            if config.BASE or not config.ADD_IMAGE_STORE:
                 p = 1
             else:
                 p = random.random()
@@ -122,9 +122,11 @@ class YOLODataset(Dataset):
                 boxes = augments["bboxes"]
             elif p < 0.5:
                 boxes = []
-                id = random.choice(range(len(self.instances)))
-                image, boxes = self.load_instance(id, preprocessing=preprocessing)
+                image, boxes = self.load_instance(id, preprocessing=weak_preprocessing)
             else:
+                # print("using mosaic")
+                if self.instances is not None:
+                    id = random.choice(range(len(self.annotations)))
                 image, boxes, _, _ = self.load_bboxes_image(id)
                 augments = preprocessing(image = image, bboxes = boxes)
                 image = augments["image"]
@@ -204,8 +206,8 @@ class YOLODataset(Dataset):
         # print(label_path)
         # print(len(bboxes))
         # print(self.filter_dataset)
-        # if self.filter_last_task:
-        #     bboxes = [box for box in bboxes if int(box[-1]) in self.filter_last_task]
+        if self.filter_last_task:
+            bboxes = [box for box in bboxes if int(box[-1]) in self.filter_last_task]
             # print(len(bboxes))
         img_path = self.instances[index].img_path.split('/')[-1]
         img_path = os.path.join(config.DATASET + '/images', img_path)
@@ -271,7 +273,7 @@ class YOLODataset(Dataset):
         # print(bboxes.type)
         # if random.random() < 0.5:
         if self.train:
-            if random.random() < 0.5 and config.MOSAIC:
+            if random.random() < 0.5:
             # if self.instances is not None:
             #load random instance from the image store
                 image, bboxes = self.load_mosaic_image_and_boxes(image, bboxes, index)
@@ -536,11 +538,8 @@ class ImageStore(Dataset):
         # image = np.array(Image.open(img_path).convert("RGB"))
 
 
-        if random.random() < 0.5 and config.MOSAIC:
-            image, bboxes, img_path, label_path = self.load_mosaic_image_and_boxes(index)
-        else:
-            preprocess = config.train_preprocess()
-            image, bboxes, img_path, label_path = self.load_instance(index, preprocess)
+
+        image, bboxes, img_path, label_path = self.load_mosaic_image_and_boxes(index)
         augmentations = config.train_transforms(image=image, bboxes=bboxes)
         image = augmentations["image"]
         bboxes = augmentations["bboxes"]
@@ -588,7 +587,7 @@ def test():
     
     transform = config.test_transforms
     IMAGE_SIZE = 32
-    file_path = os.path.join('./weights', f'image_store_task2_15_5.pth')
+    file_path = os.path.join('./weighs_final', f'image_store_base_15_5.pth')
 
     print("Finetuning")
     if os.path.exists(file_path):
@@ -598,23 +597,16 @@ def test():
         x_store = image_store.retrieve()
     
     dataset = YOLODataset(
-        'csv_path/15_5_train_new.csv',
+        '15_5_train_base.csv',
         instance= None,
-        transform=config.test_transforms,
+        transform=config.train_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
-        filter_dataset = [i for i in range(20)],
-        train = False
+        filter_dataset = [i for i in range(15)],
+        train = True
     )
-    # dataset = ImageStore(
-    #     instances=x_store,
-    #     anchors=config.ANCHORS,
-    #     transform=config.train_transforms,
-    #     S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
-    #     filter_dataset = [i for i in range(20)]
-    # )
     S = [13, 26, 52]
     scaled_anchors = torch.tensor(anchors) / (
         1 / torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
@@ -629,8 +621,8 @@ def test():
         for i in range(y[0].shape[1]):
             anchor = scaled_anchors[i]
             # print(anchor.shape)
-            # print(x[i].shape)
-            print(y[i].shape)
+            # print(x.shape)
+            # print(y[i].shape)
             # print(y[i][y[i][...,0] == 1.].shape)
             # print(y[i])
             # print(y[i][..., 0])
@@ -641,6 +633,8 @@ def test():
         # print(boxes)
         # break
         plot_image(x[0].permute(1, 2, 0).to("cpu"), boxes)
+        break
+
 
 
 
